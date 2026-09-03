@@ -354,6 +354,22 @@ def _build_system_prompt(business_profile: dict = None,
         parts.append("- If user says 'what did we find', reference the search results.")
         parts.append("- Always suggest the logical next step based on current state.")
 
+    # Inject brain context — what we've learned from past sessions
+    try:
+        from agents.brain import get_brain
+        brain = get_brain()
+        brain_ctx = brain.get_full_context()
+        if brain_ctx:
+            parts.append(f"\nBRAIN KNOWLEDGE:\n{brain_ctx}")
+            parts.append("")
+            parts.append("Use this knowledge to:")
+            parts.append("- Reference what we sell and who we target when drafting emails.")
+            parts.append("- Use industry pain points and hooks that worked before.")
+            parts.append("- Avoid approaches that failed in the past.")
+            parts.append("- Suggest next steps based on what we've learned.")
+    except Exception:
+        pass  # brain not available, continue without it
+
     return "\n".join(parts)
 
 
