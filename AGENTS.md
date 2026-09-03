@@ -23,6 +23,8 @@
 - POST data must be URL-encoded via `urllib.parse.quote()`. Raw POST silently returns empty results.
 - API is flaky — add retry logic (3 attempts with 1s delay).
 - Wikidata API (P856 property) finds websites OSM misses — essential for the "no site" detection that was broken (DBB Bandel bug).
+- Overpass returns non-business POIs: parks (`leisure=park`), playgrounds (`leisure=playground`), churches (`amenity=place_of_worship`), government offices (`amenity=townhall`). Filter them out with EXCLUDE_TAGS in `map_search.py`.
+- Category filtering is POST-search, NOT pre-search. Mapping 'education' to `amenity` tag returns ALL amenities (hospitals, restaurants). Correct: search ALL categories, then filter results by category keywords/AI.
 
 ## Scrapling (Web Scraping)
 
@@ -34,17 +36,20 @@
 
 - **Config single source of truth**: `F:/jodiac/agent_output/config.json` holds all settings. `agents/config.py` owns all access via `get_*/set_*` functions.
 - **Knowledge base**: `F:/jodiac/agent_output/knowledge_base/` — 4 JSON files. Never delete this directory.
+- **Brain**: `F:/jodiac/agent_output/brain/` — AI's growing knowledge store. Subdirs: `industries/`, `locations/`, `strategies/`, `sessions/`, `insights/`. Profile in `profile.json`. Grows automatically from brainstorming and sessions.
 - **Obsidian vault**: `D:/brain/brain/` — 7 note types with cross-links. Sync runs after every outreach session.
 - **Business profile** lives in config.json under `business_profile` key. Flows into AI prompts via `get_business_context()`.
 - **Industry research cache**: `knowledge_base/industry_research.json` — new industries researched via Gemini and cached. Empty string categories must return fallback immediately (was caching `""` as a real industry).
+- **jarvis.py** is now a thin dispatcher (~330 lines). Heavy logic lives in: `pipeline_handler.py`, `chat_handler.py`, `setup_handler.py`, `dashboard_handler.py`.
 
 ## Chatbot Patterns
 
 - Greeting patterns MUST be checked BEFORE help patterns — "how do i" matches HELP and would catch "hi" if greetings aren't first in the chain.
-- `parse_intent()` is NOW Gemini-first (not regex-first). Greetings and help are checked locally for speed, everything else goes through Gemini with function calling.
+- `parse_intent()` is Gemini-first (not regex-first). Greetings, help, and brainstorm are checked locally for speed, everything else goes through Gemini with function calling.
 - Chat memory (`chat_memory.py`) stores all messages in SQLite at `F:/jodiac/agent_output/memory/conversations.db`. Use `get_memory(session_id)` to get the active memory instance.
-- The chatbot passes conversation context (last 10 messages) to Gemini so it can reference earlier turns.
+- The chatbot passes conversation context (last 10 messages) AND session state (businesses found, drafts, profile) to Gemini so it can reference earlier turns.
 - SQLite uses `PRAGMA journal_mode=WAL` for concurrent reads/writes (CLI + WebSocket can access the same DB). Close connections in `finally` blocks to prevent leaks on WebSocket disconnect.
+- Adding a new ActionType requires updating THREE files: `chatbot.py` (parsing + function call handler), `chat_handler.py` (CLI dispatch), `web/server.py` (WebSocket dispatch).
 
 ## Web UI (FastAPI)
 
