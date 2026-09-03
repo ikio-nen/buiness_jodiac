@@ -73,12 +73,26 @@ def search_businesses(lat: float, lon: float, radius: int = 2000,
     businesses = []
     seen_names = set()
 
+    # Tags that are NOT real businesses (parks, playgrounds, churches, govt)
+    EXCLUDE_TAGS = {
+        ("leisure", "park"), ("leisure", "playground"),
+        ("leisure", "sports_centre"), ("leisure", "pitch"),
+        ("amenity", "place_of_worship"), ("amenity", "townhall"),
+        ("amenity", "public_building"), ("amenity", "community_centre"),
+        ("amenity", "fountain"), ("amenity", "shelter"),
+        ("tourism", "attraction"), ("tourism", "viewpoint"),
+    }
+
     for el in data.get("elements", []):
         tags = el.get("tags", {})
         name = tags.get("name", tags.get("brand", ""))
         if not name or name in seen_names:
             continue
         seen_names.add(name)
+
+        # Skip non-business entries (parks, churches, playgrounds, govt)
+        if any((k, tags.get(k)) in EXCLUDE_TAGS for k in tags):
+            continue
 
         el_lat = el.get("lat") or el.get("center", {}).get("lat")
         el_lon = el.get("lon") or el.get("center", {}).get("lon")
