@@ -13,6 +13,8 @@ from agents.workflows import (
     run_outreach_pipeline, research_workflow, draft_and_pdf_workflow,
 )
 from agents.chat_memory import get_memory
+from agents.brain import get_brain
+from agents.brainstorm import BrainstormSession
 from agents.live_updates import live
 
 
@@ -297,6 +299,9 @@ def run_chat_mode(session):
                 else:
                     info("No sessions yet.")
 
+            elif action.type == ActionType.BRAINSTORM:
+                _run_brainstorm(session)
+
             elif action.type == ActionType.UNKNOWN:
                 warn(action.response)
 
@@ -304,6 +309,49 @@ def run_chat_mode(session):
             error(f"Error: {type(e).__name__}: {e}")
 
         print()
+
+
+def _run_brainstorm(session):
+    """Run the brainstorm flow interactively."""
+    bs = BrainstormSession()
+
+    print()
+    typing_print("Let's set up your business profile!", C.CYAN, delay=0.03)
+    p("  I'll ask you a few questions to understand your business.", C.DIM)
+    p("  This helps me write better emails and find better leads.", C.DIM)
+    p("  Type 'skip' to skip any question, 'done' to finish early.", C.DIM)
+    print()
+
+    while not bs.complete:
+        question = bs.get_current_question()
+        if not question:
+            break
+
+        progress = bs.get_progress()
+        print(f"  {C.DIM}{progress}{C.RESET}")
+        print()
+
+        typing_print(f"JARVIS: {question}", C.RED, delay=0.03)
+        print()
+
+        try:
+            answer = input(f"  {C.WHITE}You: {C.RESET}").strip()
+        except (KeyboardInterrupt, EOFError):
+            print()
+            break
+
+        if not answer:
+            continue
+        if answer.lower() in ("exit", "quit", "back", "menu", "q"):
+            break
+
+        response = bs.process_answer(answer)
+        if response:
+            typing_print(f"JARVIS: {response}", C.RED, delay=0.03)
+            print()
+
+    if not bs.complete:
+        p(f"\n  Brainstorm paused. Say 'brainstorm' to continue.", C.DIM)
 
 
 def _ensure_session(session):

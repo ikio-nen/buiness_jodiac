@@ -25,6 +25,7 @@ class ActionType(Enum):
     RESEARCH = "research"
     REVIEW = "review"
     DASHBOARD = "dashboard"
+    BRAINSTORM = "brainstorm"
 
 
 @dataclass
@@ -211,6 +212,11 @@ def parse_intent(user_input: str, context: list[dict] = None,
 
     lower = text.lower().strip()
 
+    # Quick brainstorm check (no API call)
+    if any(w in lower for w in ("brainstorm", "set up my profile", "configure my business",
+                                  "tell you about my business", "what i sell")):
+        return Action(type=ActionType.BRAINSTORM, response="Let's set up your business profile!")
+
     # Quick help check (no API call)
     if lower in ("help", "commands", "options", "?", "what can you do"):
         return Action(type=ActionType.HELP, response="")
@@ -369,6 +375,7 @@ def _handle_function_call(function_call, user_input: str) -> Action:
         "show_help": (ActionType.HELP, lambda a: ""),
         "show_dashboard": (ActionType.DASHBOARD, lambda a: "Loading learning dashboard..."),
         "list_sessions": (ActionType.LIST_SESSIONS, lambda a: "Here are your sessions..."),
+        "start_brainstorm": (ActionType.BRAINSTORM, lambda a: "Let's set up your business profile!"),
         "ask_user": (_ask_user_action, None),
     }
 

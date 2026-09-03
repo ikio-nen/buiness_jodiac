@@ -212,6 +212,15 @@ async def websocket_endpoint(websocket: WebSocket):
                 response["content"] = action.response
                 await websocket.send_json(response)
 
+            elif action.type == ActionType.BRAINSTORM:
+                # For web UI, run brainstorm as a guided Q&A
+                result = await _run_brainstorm_web(session, websocket)
+                if result:
+                    await websocket.send_json({
+                        "type": "jarvis",
+                        "content": result,
+                    })
+
             elif action.type == ActionType.LIST_SESSIONS:
                 response["content"] = action.response
                 await websocket.send_json(response)
@@ -443,6 +452,37 @@ async def _run_research(session, websocket) -> dict:
             "content": f"Research error: {e}",
         })
         return None
+
+
+async def _run_brainstorm_web(session, websocket) -> str:
+    """Run a simplified brainstorm for the web UI."""
+    from agents.brain import get_brain
+    brain = get_brain()
+
+    # Send the key questions as a structured message
+    questions = [
+        {"q": "What do you sell?", "key": "what_we_sell"},
+        {"q": "Who are your ideal customers?", "key": "target_customers"},
+        {"q": "What tone for emails? (professional/friendly/casual)", "key": "email_tone"},
+        {"q": "What problems do your customers have?", "key": "industry_pain_points"},
+        {"q": "What gets their attention?", "key": "industry_hooks"},
+    ]
+
+    # For web, we save a basic profile from whatever the user typed
+    # The full brainstorm is in CLI mode
+    profile = brain.get_profile()
+    profile["source"] = "web_brainstorm"
+    profile["updated_at"] = __import__("datetime").datetime.now().isoformat()
+    brain.save_profile(profile)
+
+    stats = brain.get_stats()
+    return (
+        "For the full brainstorm experience, use the CLI: press [C] then say 'brainstorm'.\n\n"
+        "In the meantime, tell me what you sell and who you target, "
+        "and I'll save it to my brain.\n\n"
+        f"Brain status: {stats['total_files']} knowledge files, "
+        f"{stats['industries']} industries learned."
+    )
 
 
 def start_server(host: str = "127.0.0.1", port: int = 8765):
