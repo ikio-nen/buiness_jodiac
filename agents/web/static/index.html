@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>J.A.R.V.I.S</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <!-- Matrix rain canvas -->
+  <canvas id="matrix"></canvas>
+
+  <!-- Main container -->
+  <div class="container">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <div class="logo">
+          <span class="logo-bracket">[</span>
+          <span class="logo-text">J.A.R.V.I.S</span>
+          <span class="logo-bracket">]</span>
+        </div>
+        <div class="status-dot" id="statusDot"></div>
+        <span class="status-text" id="statusText">Connecting...</span>
+      </div>
+      <div class="header-right">
+        <span class="session-info" id="sessionInfo"></span>
+        <button class="btn-icon" id="historyBtn" title="Conversation History">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+          </svg>
+        </button>
+        <button class="btn-icon" id="statusBtn" title="System Status">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 20V10M18 20V4M6 20v-4"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <span>CONVERSATIONS</span>
+        <button class="btn-close" id="closeSidebar">&times;</button>
+      </div>
+      <div class="sidebar-list" id="conversationList">
+        <div class="sidebar-empty">No conversations yet</div>
+      </div>
+    </aside>
+
+    <!-- Chat area -->
+    <main class="chat-area" id="chatArea">
+      <div class="messages" id="messages">
+        <!-- Messages rendered here -->
+      </div>
+    </main>
+
+    <!-- Quick actions -->
+    <div class="quick-actions" id="quickActions">
+      <button class="quick-btn" data-action="search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        Search
+      </button>
+      <button class="quick-btn" data-action="draft">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+        Draft
+      </button>
+      <button class="quick-btn" data-action="research">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/>
+          <path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/>
+        </svg>
+        Research
+      </button>
+      <button class="quick-btn" data-action="send">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+        Send
+      </button>
+      <button class="quick-btn" data-action="status">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 20V10M18 20V4M6 20v-4"/>
+        </svg>
+        Status
+      </button>
+      <button class="quick-btn" data-action="dashboard">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+          <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
+        </svg>
+        Dashboard
+      </button>
+    </div>
+
+    <!-- Input area -->
+    <div class="input-area">
+      <div class="input-wrapper">
+        <span class="input-prompt">&gt;</span>
+        <input type="text" id="userInput" placeholder="Type a command or ask JARVIS..."
+               autocomplete="off" spellcheck="false">
+        <button class="send-btn" id="sendBtn" title="Send">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="22" y1="2" x2="11" y2="13"/>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </div>
+      <div class="input-hint">
+        Press Enter to send | Up/Down for history | /help for commands
+      </div>
+    </div>
+  </div>
+
+  <!-- Status panel -->
+  <div class="status-panel" id="statusPanel" style="display:none;">
+    <div class="status-panel-header">
+      <span>SYSTEM STATUS</span>
+      <button class="btn-close" id="closeStatus">&times;</button>
+    </div>
+    <div class="status-content" id="statusContent">
+      Loading...
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

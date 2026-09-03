@@ -1,0 +1,620 @@
+/* ═══════════════════════════════════════════════════════════════════
+   J.A.R.V.I.S Terminal Theme
+   Black / Red / White — Cyberpunk Command Center
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  --bg: #0a0a0a;
+  --bg-secondary: #111111;
+  --bg-tertiary: #1a1a1a;
+  --red: #e63946;
+  --red-dim: #8b1a22;
+  --red-glow: rgba(230, 57, 70, 0.3);
+  --white: #f1faee;
+  --white-dim: #a8a8a8;
+  --green: #06d6a0;
+  --cyan: #4ecdc4;
+  --yellow: #ffd166;
+  --font-mono: 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+  --font-sans: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  --border: #2a2a2a;
+  --border-glow: rgba(230, 57, 70, 0.2);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--white);
+  font-family: var(--font-mono);
+  overflow: hidden;
+}
+
+/* ── Matrix Rain Canvas ─────────────────────────────────────────── */
+
+#matrix {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  opacity: 0.06;
+  pointer-events: none;
+}
+
+/* ── Container Layout ───────────────────────────────────────────── */
+
+.container {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-width: 100%;
+}
+
+/* ── Header ─────────────────────────────────────────────────────── */
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.logo {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 2px;
+}
+
+.logo-bracket {
+  color: var(--red);
+}
+
+.logo-text {
+  color: var(--white);
+  text-shadow: 0 0 10px var(--red-glow);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--red);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+.status-dot.connected {
+  background: var(--green);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.status-text {
+  font-size: 11px;
+  color: var(--white-dim);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.session-info {
+  font-size: 11px;
+  color: var(--red);
+  padding: 2px 8px;
+  border: 1px solid var(--red-dim);
+  border-radius: 3px;
+}
+
+.btn-icon {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--white-dim);
+  padding: 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.btn-icon:hover {
+  border-color: var(--red);
+  color: var(--red);
+  box-shadow: 0 0 8px var(--red-glow);
+}
+
+/* ── Sidebar ────────────────────────────────────────────────────── */
+
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: -320px;
+  width: 320px;
+  height: 100vh;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border);
+  z-index: 100;
+  transition: left 0.3s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar.open {
+  left: 0;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: var(--red);
+}
+
+.btn-close {
+  background: none;
+  border: none;
+  color: var(--white-dim);
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.btn-close:hover {
+  color: var(--red);
+}
+
+.sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.sidebar-empty {
+  text-align: center;
+  color: var(--white-dim);
+  padding: 40px 20px;
+  font-size: 12px;
+}
+
+.conv-item {
+  padding: 12px 16px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-bottom: 4px;
+}
+
+.conv-item:hover {
+  background: var(--bg-tertiary);
+}
+
+.conv-item.active {
+  background: var(--bg-tertiary);
+  border-left: 2px solid var(--red);
+}
+
+.conv-title {
+  font-size: 13px;
+  color: var(--white);
+  margin-bottom: 2px;
+}
+
+.conv-meta {
+  font-size: 11px;
+  color: var(--white-dim);
+}
+
+/* ── Chat Area ──────────────────────────────────────────────────── */
+
+.chat-area {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  scroll-behavior: smooth;
+}
+
+.messages {
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+/* ── Message Styles ─────────────────────────────────────────────── */
+
+.message {
+  margin-bottom: 16px;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.message-user {
+  text-align: right;
+}
+
+.message-user .msg-content {
+  background: var(--red);
+  color: var(--white);
+  display: inline-block;
+  padding: 10px 16px;
+  border-radius: 8px 8px 0 8px;
+  max-width: 70%;
+  text-align: left;
+  font-size: 14px;
+}
+
+.message-jarvis .msg-content {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  display: inline-block;
+  padding: 10px 16px;
+  border-radius: 8px 8px 8px 0;
+  max-width: 85%;
+  font-size: 14px;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.msg-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+  color: var(--white-dim);
+}
+
+.message-jarvis .msg-label {
+  color: var(--red);
+}
+
+.message-user .msg-label {
+  color: var(--white-dim);
+}
+
+/* ── System Messages ────────────────────────────────────────────── */
+
+.message-system {
+  text-align: center;
+  margin: 20px 0;
+}
+
+.message-system .msg-content {
+  font-size: 12px;
+  color: var(--white-dim);
+  padding: 6px 16px;
+  background: var(--bg-tertiary);
+  border-radius: 12px;
+  display: inline-block;
+}
+
+/* ── Progress Messages ──────────────────────────────────────────── */
+
+.message-progress .msg-content {
+  border-color: var(--yellow);
+  border-left: 3px solid var(--yellow);
+}
+
+.progress-bar {
+  height: 3px;
+  background: var(--bg-tertiary);
+  border-radius: 2px;
+  margin-top: 8px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--red);
+  border-radius: 2px;
+  animation: progress 1.5s ease-in-out infinite;
+}
+
+@keyframes progress {
+  0% { width: 0%; margin-left: 0; }
+  50% { width: 60%; margin-left: 20%; }
+  100% { width: 0%; margin-left: 100%; }
+}
+
+/* ── Data Cards ─────────────────────────────────────────────────── */
+
+.data-card {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-top: 8px;
+  max-width: 85%;
+  display: inline-block;
+}
+
+.data-card-title {
+  font-size: 12px;
+  color: var(--red);
+  letter-spacing: 1px;
+  margin-bottom: 8px;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.data-table th {
+  text-align: left;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--white-dim);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.data-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-table tr:last-child td {
+  border-bottom: none;
+}
+
+.tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tag-green { background: rgba(6, 214, 160, 0.2); color: var(--green); }
+.tag-red { background: rgba(230, 57, 70, 0.2); color: var(--red); }
+.tag-yellow { background: rgba(255, 209, 102, 0.2); color: var(--yellow); }
+.tag-cyan { background: rgba(78, 205, 196, 0.2); color: var(--cyan); }
+
+/* ── Typing Indicator ───────────────────────────────────────────── */
+
+.typing-indicator {
+  display: inline-flex;
+  gap: 4px;
+  padding: 10px 16px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--red);
+  animation: typing 1.4s ease-in-out infinite;
+}
+
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typing {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+
+/* ── Quick Actions ──────────────────────────────────────────────── */
+
+.quick-actions {
+  display: flex;
+  gap: 8px;
+  padding: 8px 20px;
+  overflow-x: auto;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+}
+
+.quick-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  color: var(--white-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.quick-btn:hover {
+  border-color: var(--red);
+  color: var(--red);
+  box-shadow: 0 0 8px var(--red-glow);
+}
+
+.quick-btn:active {
+  transform: scale(0.96);
+}
+
+/* ── Input Area ─────────────────────────────────────────────────── */
+
+.input-area {
+  padding: 12px 20px 16px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 800px;
+  margin: 0 auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 12px;
+  transition: border-color 0.2s;
+}
+
+.input-wrapper:focus-within {
+  border-color: var(--red);
+  box-shadow: 0 0 12px var(--red-glow);
+}
+
+.input-prompt {
+  color: var(--red);
+  font-weight: 700;
+  font-size: 16px;
+}
+
+#userInput {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--white);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  padding: 12px 0;
+  outline: none;
+}
+
+#userInput::placeholder {
+  color: #444;
+}
+
+.send-btn {
+  background: var(--red);
+  border: none;
+  color: var(--white);
+  padding: 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.send-btn:hover {
+  background: #ff4d5a;
+  box-shadow: 0 0 12px var(--red-glow);
+}
+
+.send-btn:active {
+  transform: scale(0.92);
+}
+
+.input-hint {
+  text-align: center;
+  font-size: 11px;
+  color: #444;
+  margin-top: 6px;
+}
+
+/* ── Status Panel ───────────────────────────────────────────────── */
+
+.status-panel {
+  position: fixed;
+  top: 0;
+  right: -400px;
+  width: 400px;
+  height: 100vh;
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border);
+  z-index: 100;
+  transition: right 0.3s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.status-panel.open {
+  right: 0;
+}
+
+.status-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: var(--red);
+}
+
+.status-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px;
+  font-size: 13px;
+}
+
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.status-label {
+  color: var(--white-dim);
+}
+
+.status-value {
+  color: var(--white);
+  font-weight: 600;
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--red-dim);
+}
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .header-right .session-info { display: none; }
+  .quick-actions { padding: 8px 12px; }
+  .chat-area { padding: 12px; }
+  .input-area { padding: 8px 12px 12px; }
+}

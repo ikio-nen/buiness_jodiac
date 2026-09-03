@@ -1,0 +1,29 @@
+# Output directories
+agent_output/
+output/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temp
+*.tmp
+*.log
+.freebuff/
+
+# Memory DB (user data)
+agent_output/memory/
+agent_output/knowledge_base/
+agent_output/sessions/
