@@ -30,7 +30,23 @@
 - `c12d834` — feat: AI brainstorming system + growing brain knowledge store
 - `eda59df` — refactor: extract action_dispatch and category_filter, simplify jarvis/chat_handler
 
+### Playtest: AutoCAD Seller Flow
+**Date:** 2026-09-03
+**Status:** 49/49 passed (with web server running)
+
+Tested:
+- Brainstorm setup: profile, industry learning, location learning
+- Category filter: education keeps schools, removes pharmacy/cafe
+- EXCLUDE_TAGS: playgrounds, churches, govt offices filtered
+- Action dispatch: STATUS, DASHBOARD, BRAINSTORM all route correctly
+- Chatbot intent: greetings, help, brainstorm, edge cases
+- Brain context: profile, industry, stats all present
+- Session state: location, business count, profile injected
+- Workflow signatures: search, pipeline, draft all accept params
+- Web server: index, status API, history API all load
+- WebSocket: welcome message, chat response both work
+- Edge cases: long input, gibberish, special chars, SQL injection
+
 ### Next
 - Wire action_dispatch into web server WebSocket handler
-- Run full end-to-end playtest
-- Test brainstorm flow in CLI mode
+- Test full pipeline: search -> research -> draft -> send
