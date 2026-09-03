@@ -34,72 +34,6 @@ def research_workflow(businesses: list[dict]) -> list[dict]:
     return research_batch(businesses)
 
 
-def _filter_by_category(businesses: list[dict], category: str) -> list[dict]:
-    """AI-filter search results to match user's category description.
-
-    Uses Gemini to identify which businesses match what the user is looking for.
-    Falls back to keyword matching if AI is unavailable.
-    """
-    if not category:
-        return businesses
-
-    cat = category.lower().strip()
-
-    # Quick keyword filter first (no API call)
-    keyword_map = {
-        "education": ["school", "college", "university", "training", "coaching",
-                       "institute", "academy", "tutoring", "education", "computer",
-                       "autocad", "engineering", "polytechnic", "it training"],
-        "healthcare": ["hospital", "clinic", "pharmacy", "medical", "nursing",
-                        "dental", "health", "diagnostic", "lab"],
-        "food": ["restaurant", "cafe", "coffee", "hotel", "bar", "bakery",
-                  "dining", "eatery", "food", "pizza", "biryani"],
-        "shop": ["shop", "store", "retail", "market", "mall", "boutique",
-                  "emporium", "trading"],
-        "office": ["office", "company", "firm", "agency", "consultant",
-                    "services", "solutions", "tech", "software"],
-    }
-
-    # Find matching keyword group
-    for group, keywords in keyword_map.items():
-        if any(k in cat for k in [group] + keywords):
-            filtered = []
-            for b in businesses:
-                name_lower = (b.get("name", "") + " " + b.get("category", "")).lower()
-                if any(k in name_lower for k in keywords):
-                    filtered.append(b)
-            if filtered:  # If keyword filter found matches, use them
-                return filtered
-            # If no keyword matches, fall through to AI filter
-            break
-
-    # AI-powered filter for complex categories
-    try:
-        from agents import ai_engine
-        if not ai_engine.is_available():
-            return businesses  # no AI, return all
-
-        # Build a compact list for Gemini
-        biz_list = "\n".join([
-            f"{i+1}. {b.get('name', '?')} ({b.get('category', '?')})"
-            for i, b in enumerate(businesses[:50])
-        ])
-
-        result = ai_engine.generate_json(
-            prompt=f"""The user is searching for: "{category}"\n\nHere are the businesses found in the area:\n{biz_list}\n\nReturn a JSON list of business numbers (1-indexed) that match what the user is looking for.\nOnly include businesses that clearly fit the category.\nExample: {{"matching": [1, 3, 5]}}""",
-            system="You are a business classifier. Be precise about which businesses match the user's search intent.",
-        )
-
-        if result and "matching" in result:
-            indices = result["matching"]
-            return [businesses[i-1] for i in indices if 0 < i <= len(businesses)]
-
-    except Exception:
-        pass
-
-    return businesses  # fallback: return all
-
-
 def search_businesses_workflow(location: str, radius: int,
                               category: str = "") -> dict:
     """Search for businesses. Returns {geo_display, businesses, no_site, with_site} or error."""
@@ -115,7 +49,8 @@ def search_businesses_workflow(location: str, radius: int,
 
     # Filter by category if specified
     if category:
-        businesses = _filter_by_category(businesses, category)
+        from agents.category_filter import filter_by_category
+        businesses = filter_by_category(businesses, category)
     no_site = filter_no_website(businesses)
     with_site = [b for b in businesses if b.get("website")]
 
