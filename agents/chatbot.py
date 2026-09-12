@@ -26,6 +26,9 @@ class ActionType(Enum):
     REVIEW = "review"
     DASHBOARD = "dashboard"
     BRAINSTORM = "brainstorm"
+    CHECKIN = "checkin"
+    ASK_AGENT = "ask_agent"
+    TEAM_ACT = "team_act"
 
 
 @dataclass
@@ -170,6 +173,14 @@ _TOOLS = [
                 },
             },
             {
+                "name": "agent_check_in",
+                "description": "Run an agent check-in: scan overdue follow-ups, WhatsApp-ready leads, and what the system has learned. Use when the user asks 'check in', 'what needs attention', 'brief me', 'any updates', or wants a status overview of outreach health.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
+            {
                 "name": "list_sessions",
                 "description": "List all previous outreach sessions.",
                 "parameters": {
@@ -189,6 +200,32 @@ _TOOLS = [
                         },
                     },
                     "required": ["question"],
+                },
+            },
+            {
+                "name": "ask_specialist",
+                "description": "Route a question to a specialist teammate who remembers past conversations and can search the web. Use when the user wants an opinion, research, or analysis -- e.g. 'ask scout about schools in Bandel', 'what does strategist think?', 'how are we doing?'. Choose agent: 'scout' (finds/vets businesses and markets), 'strategist' (outreach angles and tactics), 'analyst' (numbers and what the team is learning).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "agent": {
+                            "type": "string",
+                            "description": "Which specialist: scout, strategist, or analyst",
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "The question or topic to hand the specialist",
+                        },
+                    },
+                    "required": ["agent", "message"],
+                },
+            },
+            {
+                "name": "team_act",
+                "description": "Put the whole specialist team to work on the current prospects: Scout researches the top ones, Strategist pre-writes opening hooks, Analyst debriefs. Use when the user says things like 'team act', 'put the team on it', 'have the team research them'.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
                 },
             },
         ],
@@ -213,13 +250,44 @@ def parse_intent(user_input: str, context: list[dict] = None,
     lower = text.lower().strip()
 
     # Quick brainstorm check (no API call)
-    if any(w in lower for w in ("brainstorm", "set up my profile", "configure my business",
-                                  "tell you about my business", "what i sell")):
+    BRAINSTORM_TRIGGERS = (
+        "brainstorm", "set up my profile", "configure my business",
+        "tell you about my business", "what i sell", "about my mission",
+        "my mission", "what do i sell", "start a new project",
+        "new project", "business profile", "my product", "my business",
+    )
+    if any(w in lower for w in BRAINSTORM_TRIGGERS):
         return Action(type=ActionType.BRAINSTORM, response="Let's set up your business profile!")
 
     # Quick help check (no API call)
     if lower in ("help", "commands", "options", "?", "what can you do"):
         return Action(type=ActionType.HELP, response="")
+
+    # Quick check-in triggers (no API call)
+    CHECKIN_TRIGGERS = (
+        "check in", "checkin", "check-up", "whats new", "what's new",
+        "any updates", "brief me", "briefing", "what needs attention",
+        "anything due", "status of follow", "overdue",
+    )
+    if lower in CHECKIN_TRIGGERS or any(lower.startswith(t) for t in CHECKIN_TRIGGERS):
+        return Action(type=ActionType.CHECKIN, response="Scanning everything I know...")
+
+    # Quick "talk to a specialist" triggers (no API call)
+    for agent_key in ("scout", "strategist", "analyst"):
+        if lower.startswith(f"ask {agent_key}"):
+            msg = text[len(f"ask {agent_key}"):].strip(" :,-") \
+                or "Introduce yourself and what you can help with."
+            return Action(type=ActionType.ASK_AGENT,
+                          params={"agent": agent_key, "message": msg},
+                          response=f"Looping in {agent_key.capitalize()}...")
+
+    # Quick team-act triggers (no API call)
+    TEAM_TRIGGERS = ("team act", "teamact", "put the team on it",
+                     "team get to work", "have the team research",
+                     "put the team to work")
+    if lower in TEAM_TRIGGERS or any(lower.startswith(t) for t in TEAM_TRIGGERS):
+        return Action(type=ActionType.TEAM_ACT,
+                      response="Putting the team on the current prospects...")
 
     # Quick greeting check (no API call)
     if lower in _GREETING_WORDS or any(lower.startswith(g) for g in _GREETING_WORDS):
@@ -317,7 +385,8 @@ def _build_system_prompt(business_profile: dict = None,
         "You understand natural language and can handle complex, multi-step requests.",
         "You have access to these tools: search_businesses, draft_emails, send_emails, "
         "review_emails, research_businesses, sync_obsidian, scrape_websites, "
-        "enrich_emails, show_status, show_help, show_dashboard, list_sessions, ask_user.",
+        "enrich_emails, show_status, show_help, show_dashboard, list_sessions, "
+        "ask_specialist, ask_user.",
         "",
         "Rules:",
         "- Always use a function call unless the user is just chatting.",
@@ -326,6 +395,9 @@ def _build_system_prompt(business_profile: dict = None,
         "- If the user says 'draft' or 'write emails', use draft_emails.",
         "- If the user says 'send', use send_emails.",
         "- If the user says 'status' or 'dashboard', use the appropriate tool.",
+        "- If the user wants an opinion, research, or analysis (e.g. 'ask scout ...', "
+        "'what does strategist think'), use ask_specialist and pick the agent: "
+        "scout (finds businesses), strategist (outreach tactics), analyst (numbers).",
         "- For greetings or casual chat, respond naturally without a tool.",
         "- If information is missing (e.g. no location for search), use ask_user.",
         "",
@@ -390,8 +462,10 @@ def _handle_function_call(function_call, user_input: str) -> Action:
         "show_status": (ActionType.STATUS, lambda a: "Here's where things stand..."),
         "show_help": (ActionType.HELP, lambda a: ""),
         "show_dashboard": (ActionType.DASHBOARD, lambda a: "Loading learning dashboard..."),
+        "agent_check_in": (ActionType.CHECKIN, lambda a: "Scanning everything I know..."),
+        "ask_specialist": (ActionType.ASK_AGENT, lambda a: "Looping in a specialist..."),
+        "team_act": (ActionType.TEAM_ACT, lambda a: "Putting the team to work..."),
         "list_sessions": (ActionType.LIST_SESSIONS, lambda a: "Here are your sessions..."),
-        "start_brainstorm": (ActionType.BRAINSTORM, lambda a: "Let's set up your business profile!"),
         "ask_user": (_ask_user_action, None),
     }
 
@@ -464,6 +538,15 @@ I can help you with business outreach. Here's what I understand:
   STATUS & DASHBOARD
     "What's the status?"
     "Show me the dashboard"
+
+  MY TEAM (specialist agents)
+    "Ask scout about restaurants in Bandel"
+    "Ask strategist how to pitch schools"
+    "Ask analyst how we're doing"
+    "Ask scout to read dbbandel.org and summarize it"
+    "Ask strategist to draft an email for Don Bosco"
+    "Team act" (Scout researches, Strategist writes hooks, Analyst debriefs)
+    "What does scout think about this?"
 
   MULTI-STEP
     "Find schools in Bandel and draft emails for the top 5"

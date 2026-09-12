@@ -9,96 +9,27 @@ The brainstorm is designed to be conversational, not a form. JARVIS
 asks one question at a time, listens to the answer, and follows up
 based on what it learns.
 """
-from dataclasses import dataclass, field
-from typing import Optional
-
 from agents.brain import get_brain
 
 
 # ── Brainstorm steps ────────────────────────────────────────────────
-
-@dataclass
-class BrainstormStep:
-    """One question in the brainstorm flow."""
-    key: str           # Field name in the brain profile
-    question: str      # What to ask the user
-    follow_ups: dict = field(default_factory=dict)  # {answer_keyword: follow_up_question}
-    required: bool = False
-    category: str = "profile"  # Where to save: profile, industry, strategy
+# Each step: {key, question, follow_ups, required, category}
 
 
 BRAINSTORM_STEPS = [
-    BrainstormStep(
-        key="what_we_sell",
-        question="What do you sell? (e.g., AutoCAD product keys, web design services, consulting)",
-        required=True,
-    ),
-    BrainstormStep(
-        key="product_details",
-        question="Tell me more about your product. What makes it special? Why would someone buy it from you?",
-        category="profile",
-    ),
-    BrainstormStep(
-        key="target_customers",
-        question="Who are your ideal customers? (e.g., educational centers, restaurants, shops)",
-        required=True,
-    ),
-    BrainstormStep(
-        key="ideal_customer_profile",
-        question="Describe your perfect customer. What size are they? What's their budget? What problem do they have that you solve?",
-        category="profile",
-    ),
-    BrainstormStep(
-        key="our_story",
-        question="What's your story? How did you start? What's your mission?",
-        category="profile",
-    ),
-    BrainstormStep(
-        key="competitors",
-        question="Who are your competitors? What do they do better than you? What do you do better than them?",
-        category="profile",
-    ),
-    BrainstormStep(
-        key="goals",
-        question="What are your goals for the next 3 months? How many customers do you want to reach?",
-        category="profile",
-    ),
-    BrainstormStep(
-        key="email_tone",
-        question="What tone should emails have? (professional / friendly / casual / bold)",
-        follow_ups={
-            "professional": "Got it -- formal and respectful.",
-            "friendly": "Got it -- warm and approachable.",
-            "casual": "Got it -- relaxed and conversational.",
-            "bold": "Got it -- confident and direct.",
-        },
-        category="profile",
-    ),
-    BrainstormStep(
-        key="communication_style",
-        question="Anything else about how you want to communicate? Any phrases to use or avoid?",
-        category="profile",
-    ),
-    BrainstormStep(
-        key="industry_pain_points",
-        question="What problems do your customers typically have? What keeps them up at night?",
-        category="industry",
-    ),
-    BrainstormStep(
-        key="industry_hooks",
-        question="What's the one thing that gets their attention? What makes them stop and read an email?",
-        category="industry",
-    ),
-    BrainstormStep(
-        key="past_outreach",
-        question="Have you done outreach before? What worked? What didn't?",
-        category="strategy",
-    ),
-    BrainstormStep(
-        key="attachments",
-        question="Do you have any files to attach to emails? (brochures, price lists, catalogs) If yes, paste the path. If no, skip.",
-        category="profile",
-    ),
+    {"key": "what_we_sell", "question": "What do you sell? (e.g., AutoCAD product keys, web design services, consulting)", "required": True},
+    {"key": "product_details", "question": "Tell me more about your product. What makes it special? Why would someone buy it from you?"},
+    {"key": "target_customers", "question": "Who are your ideal customers? (e.g., educational centers, restaurants, shops)", "required": True},
+    {"key": "ideal_customer_profile", "question": "Describe your perfect customer. What size are they? What's their budget? What problem do they have that you solve?"},
+    {"key": "our_story", "question": "What's your story? How did you start? What's your mission?"},
+    {"key": "competitors", "question": "Who are your competitors? What do they do better than you? What do you do better than them?"},
+    {"key": "goals", "question": "What are your goals for the next 3 months? How many customers do you want to reach?"},
+    {"key": "email_tone", "question": "What tone should emails have? (professional / friendly / casual / bold)", "follow_ups": {"professional": "Got it -- formal and respectful.", "friendly": "Got it -- warm and approachable.", "casual": "Got it -- relaxed and conversational.", "bold": "Got it -- confident and direct."}},
+    {"key": "communication_style", "question": "Anything else about how you want to communicate? Any phrases to use or avoid?"},
+    {"key": "industry_pain_points", "question": "What problems do your customers typically have? What keeps them up at night?", "category": "industry"},
+    {"key": "industry_hooks", "question": "What's the one thing that gets their attention? What makes them stop and read an email?", "category": "industry"},
+    {"key": "past_outreach", "question": "Have you done outreach before? What worked? What didn't?", "category": "strategy"},
+    {"key": "attachments", "question": "Do you have any files to attach to emails? (brochures, price lists, catalogs) If yes, paste the path. If no, skip."},
 ]
 
 
@@ -120,14 +51,12 @@ class BrainstormSession:
 
         step = BRAINSTORM_STEPS[self.step_index]
 
-        # Skip optional steps if user seems in a hurry
-        if self.step_index > 0 and not step.required:
-            # Every 3rd optional step, ask if they want to skip the rest
+        if self.step_index > 0 and not step.get("required"):
             if self.step_index % 4 == 0 and len(self.answers) > 2:
-                return (f"{step.question}\n\n"
+                return (f"{step['question']}\n\n"
                         f"(Reply 'skip' to skip remaining questions, or 'done' to finish)")
 
-        return step.question
+        return step["question"]
 
     def process_answer(self, answer: str) -> str:
         """Process the user's answer and return a response."""
@@ -136,9 +65,9 @@ class BrainstormSession:
             return ""
 
         step = BRAINSTORM_STEPS[self.step_index]
+        key = step["key"]
         answer = answer.strip()
 
-        # Handle skip/done
         if answer.lower() in ("skip", "done", "next", "s", "d"):
             self.step_index += 1
             if self.step_index >= len(BRAINSTORM_STEPS):
@@ -146,27 +75,20 @@ class BrainstormSession:
                 return self._finish()
             return ""
 
-        # Save the answer
-        self.answers[step.key] = answer
+        self.answers[key] = answer
 
-        # First answer sets the industry name
-        if step.key == "what_we_sell":
+        if key == "what_we_sell":
             self.industry_name = answer.split(",")[0].strip().lower()
 
-        # Build response
         response = ""
-
-        # Check for follow-up
         answer_lower = answer.lower()
-        for keyword, follow_up in step.follow_ups.items():
+        for keyword, follow_up in step.get("follow_ups", {}).items():
             if keyword in answer_lower:
                 response = follow_up
                 break
 
-        # Save to brain immediately
         self._save_answer(step, answer)
 
-        # Move to next step
         self.step_index += 1
         if self.step_index >= len(BRAINSTORM_STEPS):
             self.complete = True
@@ -177,24 +99,25 @@ class BrainstormSession:
 
         return response
 
-    def _save_answer(self, step: BrainstormStep, answer: str):
+    def _save_answer(self, step: dict, answer: str):
         """Save an answer to the brain."""
-        if step.category == "profile":
+        key = step["key"]
+        cat = step.get("category", "profile")
+
+        if cat == "profile":
             profile = self.brain.get_profile()
-            profile[step.key] = answer
+            profile[key] = answer
             self.brain.save_profile(profile)
 
-        elif step.category == "industry" and self.industry_name:
-            if step.key == "industry_pain_points":
-                points = [p.strip() for p in answer.split("\n") if p.strip()]
-                self.brain.learn_industry(self.industry_name, pain_points=points)
-            elif step.key == "industry_hooks":
-                hooks = [h.strip() for h in answer.split("\n") if h.strip()]
-                self.brain.learn_industry(self.industry_name, hooks=hooks)
+        elif cat == "industry" and self.industry_name:
+            items = [x.strip() for x in answer.split("\n") if x.strip()]
+            if key == "industry_pain_points":
+                self.brain.learn_industry(self.industry_name, pain_points=items)
+            elif key == "industry_hooks":
+                self.brain.learn_industry(self.industry_name, hooks=items)
 
-        elif step.category == "strategy":
-            if step.key == "past_outreach":
-                self.brain.learn_industry(self.industry_name, notes=f"Past outreach: {answer}")
+        elif cat == "strategy" and self.industry_name:
+            self.brain.learn_industry(self.industry_name, notes=f"Past outreach: {answer}")
 
     def _finish(self) -> str:
         """Build the completion message."""

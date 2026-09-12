@@ -17,10 +17,49 @@ from .config import (
     OBSIDIAN_INDUSTRIES, OBSIDIAN_RESEARCH, OBSIDIAN_COMPETITORS,
     OBSIDIAN_FOLLOWUPS, OBSIDIAN_INSIGHTS,
 )
+from agents.contact_export import _phone_source
+
+
+def _src_note(business: dict) -> str:
+    """Small italic source note for the contact-info phone line."""
+    src = _phone_source(business)
+    return f" _({src})_" if src else ""
+
+
+def _email_source(business: dict, enrichment: dict = None) -> str:
+    """Email provenance: hunter > osm > maps (matches _resolved_email priority)."""
+    if (enrichment or {}).get("email"):
+        return "hunter"
+    if business.get("email"):
+        return "osm"
+    if business.get("maps_email"):
+        return "maps"
+    return ""
+
 
 
 def _slug(name: str) -> str:
     return name.replace(" ", "_").replace("'", "").replace("&", "and").lower()
+
+def _phone_display(business: dict) -> str:
+    """Phone to show in notes — prefer the OSM phone, fall back to maps phone."""
+    p = business.get("phone") or business.get("maps_phone", "")
+    return p[:20]
+
+
+def _resolved_email(business: dict, enrichment: dict = None) -> str:
+    """Best available email for the business: explicit > enrichment > maps."""
+    return (
+        business.get("email", "")
+        or (enrichment or {}).get("email", "")
+        or business.get("maps_email", "")
+    )
+
+
+def _resolved_phone(business: dict) -> str:
+    """Best available phone: OSM explicit > maps-discovered."""
+    return business.get("phone", "") or business.get("maps_phone", "")
+
 
 def _contact_filename(name: str) -> str:
     return f"{_slug(name)}.md"
@@ -79,10 +118,12 @@ def create_project_note(session_id: str, project_name: str,
 
     for i, b in enumerate(businesses, 1):
         has_site = "Yes" if b.get("website") else "**NO**"
-        phone = b.get("phone", "")[:15]
+        phone = _phone_display(b)
         addr = b.get("address", "")[:25]
         contact_link = f"[[{_contact_filename(b['name'])}|{b['name']}]]"
-        lines.append(f"| {i} | {contact_link} | {b.get('category', '')} | {has_site} | {phone} | {addr} |")
+        phone_src = _phone_source(b)
+        phone_cell = (f"{phone} ({phone_src})" if phone_src and phone else phone)
+        lines.append(f"| {i} | {contact_link} | {b.get('category', '')} | {has_site} | {phone_cell} | {addr} |")
 
     # Group by category for industry links
     categories = set(b.get("category", "other") for b in businesses)
@@ -101,15 +142,16 @@ def create_contact_note(business: dict, enrichment: dict = None,
     """Create a contact note with backlinks to project, industry, and outreach."""
     name = business.get("name", "Unknown")
     category = business.get("category", "uncategorized")
-    email = business.get("email", "")
-    if enrichment and enrichment.get("email"):
-        email = enrichment["email"]
+    email = _resolved_email(business, enrichment)
+    phone = _resolved_phone(business)
 
     lines = [
         "---",
         f"business: {name}",
         f"email: {email}",
-        f"phone: {business.get('phone', '')}",
+        f"phone: {phone}",
+        f"email_source: {_email_source(business, enrichment)}",
+        f"phone_source: {_phone_source(business)}",
         f"website: {business.get('website', '')}",
         f"address: {business.get('address', '')}",
         f"category: {category}",
@@ -128,9 +170,14 @@ def create_contact_note(business: dict, enrichment: dict = None,
         lines.append(f"**Industry:** [[{_industry_filename(category)}|{category.replace('_', ' ').title()}]]")
         lines.append(f"**Follow-up:** [[{_followup_filename(name, session_id)}]]\n")
 
+    phone = business.get("phone") or business.get("maps_phone", "")
+    email = (
+        business.get("email", "") or business.get("maps_email", "")
+        or (business.get("enrichment") or {}).get("email", "")
+    )
     lines.append(f"## Contact Info\n")
+    lines.append(f"- **Phone:** {phone or 'N/A'}{_src_note(business)}")
     lines.append(f"- **Email:** {email or 'Not found'}")
-    lines.append(f"- **Phone:** {business.get('phone', 'N/A')}")
     lines.append(f"- **Website:** {business.get('website', 'None - needs one!')}")
     lines.append(f"- **Address:** {business.get('address', 'N/A')}")
     lines.append(f"- **Hours:** {business.get('opening_hours', 'N/A')}")
@@ -502,9 +549,9 @@ def create_business_research_note(business: dict, research: dict,
     # Business details
     lines.append(f"## Business Details\n")
     lines.append(f"- **Address:** {business.get('address', 'N/A')}")
-    lines.append(f"- **Phone:** {business.get('phone', 'N/A')}")
+    lines.append(f"- **Phone:** {_resolved_phone(business) or 'N/A'}{_src_note(business)}")
+    lines.append(f"- **Email:** {_resolved_email(business) or 'Not found'}")
     lines.append(f"- **Website:** {business.get('website', 'None - needs one!')}")
-    lines.append(f"- **Email:** {business.get('email', 'Not found')}")
     lines.append(f"- **Hours:** {business.get('opening_hours', 'N/A')}")
 
     # Related notes

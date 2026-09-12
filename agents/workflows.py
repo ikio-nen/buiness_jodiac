@@ -1,8 +1,12 @@
 """Pure workflow logic. No UI calls. Each function takes explicit params, returns results."""
+from datetime import datetime
 from pathlib import Path
 from agents.map_search import geocode, search_businesses, filter_no_website, verify_no_site_businesses
 from agents.pdf_gen import generate_proposal_pdf
 from agents.mailer import send_email
+from agents.sent_email_pdf import send_receipt_pdf, sent_dir
+from agents.maps_contact_fallback import enrich_with_maps_contacts
+from agents.contact_export import write_phones_csv
 from agents.obsidian_sync import (
     create_project_note, create_contact_note, create_outreach_form,
     create_industry_note, create_research_note, create_competitor_note,
@@ -13,6 +17,7 @@ from agents.obsidian_sync import (
 from agents.config import (
     get_sender_name, get_hunter_key, set_hunter_key,
     get_gmail_user, OBSIDIAN_VAULT,
+    save_session_data, load_session_data,
 )
 from agents import Orchestrator
 from agents.learn import (
@@ -29,9 +34,38 @@ def research_workflow(businesses: list[dict]) -> list[dict]:
     Returns list of research dicts, one per business.
     Each dict has: name, rating, review_count, strengths, gaps,
     email_hook, improvement_suggestion.
+
+    Every successful research result is also stored in the brain as
+    per-business knowledge (agents/businesses/<name>.json).
     """
     from agents.business_research import research_batch
-    return research_batch(businesses)
+    results = research_batch(businesses)
+
+    # Feed the brain: one knowledge file per business
+    try:
+        from agents.brain import get_brain
+        brain = get_brain()
+        for biz, r in zip(businesses, results):
+            if r.get("error"):
+                continue
+            brain.learn_business(
+                r.get("name") or biz.get("name", "?"),
+                category=r.get("category") or biz.get("category", ""),
+                facts={
+                    "rating": r.get("rating"),
+                    "review_count": r.get("review_count"),
+                    "strengths": r.get("strengths", []),
+                    "gaps": r.get("gaps", []),
+                    "email_hook": r.get("email_hook", ""),
+                    "improvement_suggestion": r.get("improvement_suggestion", ""),
+                },
+                interaction={"type": "researched", "detail": f"rating={r.get('rating', 0)}"},
+                source="research",
+            )
+    except Exception:
+        pass  # learning must never break research
+
+    return results
 
 
 def search_businesses_workflow(location: str, radius: int,
@@ -83,9 +117,32 @@ def scrape_businesses_workflow(businesses: list[dict]) -> list[dict]:
 
 
 def enrich_workflow(businesses: list[dict], hunter_key: str) -> dict:
-    """Enrich businesses with Hunter.io. Returns {enriched, enriched_count}."""
+    """Enrich businesses with Hunter.io when the key is set, otherwise run a
+    best-effort Maps/Google contact fallback for phone + email.
+
+    Returns {enriched, enriched_count, method, results}."""
     if not hunter_key:
-        return {"enriched": businesses, "enriched_count": 0, "skipped": True}
+        maps = enrich_with_maps_contacts(businesses)
+        return {
+            "enriched": businesses,
+            "enriched_count": maps["email_found"],
+            "skipped": False,
+            "method": "maps_fallback",
+            "phone_found": maps["phone_found"],
+            "maps_results": maps,
+            "results": [
+                {
+                    "name": b["name"],
+                    "email": b.get("email") or b.get("maps_email", ""),
+                    "phone": b.get("phone") or b.get("maps_phone", ""),
+                    "found": bool(
+                        b.get("email") or b.get("maps_email", "")
+                        or b.get("phone") or b.get("maps_phone", "")
+                    ),
+                }
+                for b in businesses
+            ],
+        }
 
     enriched_count = 0
     results = []
@@ -102,8 +159,12 @@ def enrich_workflow(businesses: list[dict], hunter_key: str) -> dict:
         if result.success and result.output.get("email"):
             biz["enrichment"] = result.output
             enriched_count += 1
-            results.append({"name": biz["name"], "email": result.output["email"],
-                           "position": result.output.get("position", "N/A"), "found": True})
+            results.append({
+                "name": biz["name"],
+                "email": result.output["email"],
+                "position": result.output.get("position", "N/A"),
+                "found": True,
+            })
         else:
             results.append({"name": biz["name"], "email": None, "found": False})
 
@@ -164,12 +225,40 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
             if research and not research.get("error"):
                 research_ctx = format_research_for_email(research)
 
-        # Combine learning + research context
+        # Per-business brain memory: rating, gaps, past interactions.
+        # Guarded like every other learning hook — a brain failure must
+        # never break drafting.
+        brain_ctx = ""
+        try:
+            from agents.brain import get_brain
+            brain_ctx = get_brain().get_business_context(biz["name"])
+        except Exception:
+            brain_ctx = ""
+
+        # Combine: industry learning + business research + brain memory
         combined_ctx = learning_ctx
         if research_ctx:
             combined_ctx = f"{learning_ctx}\n\n--- Research on this specific business ---\n{research_ctx}" if learning_ctx else research_ctx
+        if brain_ctx:
+            combined_ctx = f"{combined_ctx}\n\n--- Brain memory of this business ---\n{brain_ctx}" if combined_ctx else brain_ctx
+
+        # Layer 2: Strategist's pre-written hook (from the agent team) rides
+        # the existing "Suggested opening:" channel -- the template path
+        # already scans for it and the AI path gets it as prompt context.
+        try:
+            from agents.agent_team import get_hook_for
+            team_hook = get_hook_for(biz["name"])
+            if team_hook:
+                team_line = f"Suggested opening: {team_hook}"
+                combined_ctx = f"{team_line}\n{combined_ctx}" if combined_ctx else team_line
+        except Exception:
+            pass
 
         email_task = "ai_draft_email" if use_ai else "draft_email"
+        # AI first; the orchestrator owns the ai_* -> template fallback and
+        # the agent layer owns raising-vs-falling, so the workflow just runs
+        # one task and reports honestly. (ai_design now raises on failure, so
+        # an ai_ task failing here really does mean both layers failed.)
         email_result = orch.run(email_task, {
             "business_name": biz["name"],
             "contact_name": contact_name,
@@ -177,15 +266,6 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
             "category": category,
             "learning_context": combined_ctx,
         }, context={"sender_name": sender_name})
-
-        if not email_result.success and use_ai:
-            email_result = orch.run("draft_email", {
-                "business_name": biz["name"],
-                "contact_name": contact_name,
-                "email": email,
-                "category": category,
-                "learning_context": combined_ctx,
-            }, context={"sender_name": sender_name})
 
         # PDF
         pdf_path = ""
@@ -199,6 +279,8 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
         if not biz.get("website"):
             site_task = "ai_generate_website" if use_ai else "generate_website"
             try:
+                # Same single-task policy as email: orchestrator handles the
+                # ai_* -> template fallback, agent layer raises on failure.
                 site_result = orch.run(site_task, {
                     "name": biz["name"],
                     "category": biz.get("category", ""),
@@ -208,16 +290,6 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
                     "opening_hours": biz.get("opening_hours", ""),
                     "tags": biz.get("tags", {}),
                 })
-                if not site_result.success and use_ai:
-                    site_result = orch.run("generate_website", {
-                        "name": biz["name"],
-                        "category": biz.get("category", ""),
-                        "address": biz.get("address", ""),
-                        "phone": biz.get("phone", ""),
-                        "email": email,
-                        "opening_hours": biz.get("opening_hours", ""),
-                        "tags": biz.get("tags", {}),
-                    })
                 if site_result.success:
                     website_path = site_result.output.get("path", "")
                     if site_result.output.get("ai_powered"):
@@ -234,6 +306,19 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
                 ai_count += 1
             # Learn from this draft
             learn_from_draft(category, draft.get("subject", ""), draft.get("body", ""))
+            # Day-one brain memory: capture the draft itself, not just sends,
+            # so future sessions know we've been in touch.
+            try:
+                from agents.brain import get_brain
+                get_brain().learn_business(
+                    biz["name"],
+                    category=category,
+                    facts={"email": draft.get("to", "")},
+                    interaction={"type": "drafted", "detail": draft.get("subject", "")[:80]},
+                    source="draft",
+                )
+            except Exception:
+                pass
             drafts.append(draft)
         else:
             errors.append({"name": biz["name"], "type": "email", "error": email_result.error})
@@ -274,7 +359,8 @@ def review_and_send_workflow(drafts: list[dict], sender_name: str) -> dict:
     approved = review_result.get("approved", [])
 
     if not approved:
-        return {"sent": [], "skipped": len(drafts), "attached": 0, "errors": []}
+        return {"sent": [], "skipped": len(drafts), "attached": 0, "errors": [],
+                "sent_pdf_dir": str(sent_dir()), "contacted_csv": ""}
 
     # Prepare approved drafts for sending (with attachments)
     send_list = get_approved_with_attachments(approved)
@@ -282,22 +368,48 @@ def review_and_send_workflow(drafts: list[dict], sender_name: str) -> dict:
     # Send
     sent = []
     errors = []
-    attached_count = sum(1 for d in send_list if d.get("attachment_path"))
+    attached_count = 0
+    sent_records = []
 
     for draft in send_list:
         if not draft.get("to"):
             continue
+        biz = draft.get("business", {})
+        pdf_path = draft.get("pdf_path", "")
+        # Only attach a proposal PDF that actually exists on disk
+        real_pdf = pdf_path if pdf_path and Path(pdf_path).exists() else ""
+        if real_pdf:
+            attached_count += 1
         result = send_email(
             to=draft["to"],
             subject=draft["subject"],
             body=draft["body"],
-            pdf_path=draft.get("pdf_path", ""),
+            pdf_path=real_pdf,
             sender_name=sender_name,
             attachment_path=draft.get("attachment_path", ""),
         )
         if result["success"]:
+            # Write the sent-email receipt PDF
+            attached_name = Path(real_pdf).name if real_pdf else None
+            rec_path = send_receipt_pdf(
+                business_name=biz.get("name", "Business"),
+                to=draft["to"],
+                subject=draft["subject"],
+                body=draft["body"],
+                sender_name=sender_name,
+                attached_pdf_name=attached_name,
+            )
+            record = {
+                "business": biz,
+                "to": draft["to"],
+                "subject": draft["subject"],
+                "body": draft["body"],
+                "pdf_path": real_pdf,
+                "receipt_pdf": rec_path,
+                "timestamp": datetime.now().isoformat(),
+            }
             sent.append(draft)
-            biz = draft.get("business", {})
+            sent_records.append(record)
             if biz.get("name"):
                 mark_contact_approached(biz["name"])
                 learn_from_send(
@@ -307,14 +419,32 @@ def review_and_send_workflow(drafts: list[dict], sender_name: str) -> dict:
                     success=True,
                 )
         else:
-            errors.append({"name": draft.get("business", {}).get("name", "?"),
+            errors.append({"name": biz.get("name", "?") if biz else "?",
                           "error": result.get("error", "Unknown")})
+
+    # Phone/email export of the businesses we actually contacted, for later
+    # WhatsApp messaging. (A broader export is also written in
+    # run_outreach_pipeline from the full enriched business list.)
+    contacted_csv = ""
+    if sent_records:
+        try:
+            contacted_csv = write_phones_csv(
+                [r["business"] for r in sent_records],
+                out_dir=sent_dir(),
+                filename="phones_contacted_{}.csv".format(
+                    datetime.now().strftime("%Y%m%d_%H%M%S")),
+            )
+        except Exception:
+            contacted_csv = ""
 
     return {
         "sent": sent,
         "skipped": len(drafts) - len(sent),
         "attached": attached_count,
         "errors": errors,
+        "sent_records": sent_records,
+        "sent_pdf_dir": str(sent_dir()),
+        "contacted_csv": contacted_csv,
     }
 
 
@@ -325,32 +455,69 @@ def send_emails_workflow(drafts: list[dict], sender_name: str) -> dict:
 
     sent = []
     errors = []
+    attached_count = 0
+    sent_records = []
 
     for draft in to_send:
+        if not draft.get("to"):
+            continue
+        biz = draft.get("business", {})
+        pdf_path = draft.get("pdf_path", "")
+        real_pdf = pdf_path if pdf_path and Path(pdf_path).exists() else ""
+        if real_pdf:
+            attached_count += 1
         result = send_email(
             to=draft["to"],
             subject=draft["subject"],
             body=draft["body"],
-            pdf_path=draft.get("pdf_path", ""),
+            pdf_path=real_pdf,
             sender_name=sender_name,
             attachment_path=draft.get("attachment_path", ""),
         )
         if result["success"]:
+            attached_name = Path(real_pdf).name if real_pdf else None
+            rec_path = send_receipt_pdf(
+                business_name=biz.get("name", "Business"),
+                to=draft["to"],
+                subject=draft["subject"],
+                body=draft["body"],
+                sender_name=sender_name,
+                attached_pdf_name=attached_name,
+            )
+            record = {
+                "business": biz,
+                "to": draft["to"],
+                "subject": draft["subject"],
+                "body": draft["body"],
+                "pdf_path": real_pdf,
+                "receipt_pdf": rec_path,
+                "timestamp": datetime.now().isoformat(),
+            }
             sent.append(draft)
-            biz = draft.get("business", {})
+            sent_records.append(record)
             if biz.get("name"):
                 mark_contact_approached(biz["name"])
-            # Learn from successful send
             learn_from_send(
                 biz.get("category", "unknown"),
                 draft.get("subject", ""),
                 draft.get("body", ""),
                 success=True,
             )
+            # Per-business brain memory of the send
+            try:
+                from agents.brain import get_brain
+                get_brain().learn_business(
+                    biz.get("name", "?"),
+                    category=biz.get("category", ""),
+                    facts={"phone": biz.get("phone", ""), "email": draft.get("to", "")},
+                    interaction={"type": "emailed", "detail": draft.get("subject", "")[:80]},
+                    source="send",
+                )
+            except Exception:
+                pass
         else:
-            errors.append({"name": draft.get("business", {}).get("name", "?"),
+            errors.append({"name": biz.get("name", "?") if biz else "?",
                           "error": result.get("error", "Unknown")})
-            # Learn from failed send (likely bounce)
             learn_from_send(
                 draft.get("business", {}).get("category", "unknown"),
                 draft.get("subject", ""),
@@ -358,7 +525,27 @@ def send_emails_workflow(drafts: list[dict], sender_name: str) -> dict:
                 success=False,
             )
 
-    return {"sent": sent, "skipped": skipped, "errors": errors}
+    contacted_csv = ""
+    if sent_records:
+        try:
+            contacted_csv = write_phones_csv(
+                [r["business"] for r in sent_records],
+                out_dir=sent_dir(),
+                filename="phones_contacted_{}.csv".format(
+                    datetime.now().strftime("%Y%m%d_%H%M%S")),
+            )
+        except Exception:
+            contacted_csv = ""
+
+    return {
+        "sent": sent,
+        "skipped": skipped,
+        "errors": errors,
+        "sent_records": sent_records,
+        "attached": attached_count,
+        "sent_pdf_dir": str(sent_dir()),
+        "contacted_csv": contacted_csv,
+    }
 
 
 def obsidian_sync_workflow(businesses: list[dict], session_id: str,
@@ -486,42 +673,88 @@ def run_outreach_pipeline(location: str, radius: int, session_id: str,
             if b["name"] in scraped_map:
                 search["businesses"][i].update(scraped_map[b["name"]])
 
-    # 3. ENRICH (Hunter.io — find emails for businesses WITH websites)
+    # 3. ENRICH
+    #    - With Hunter key: find emails for businesses that HAVE a website (Hunter
+    #      needs a domain). Merge any results back into no_site by name.
+    #    - Without Hunter key: run the best-effort Maps/Google contact fallback on
+    #      the no-site outreach targets (the businesses we'll actually email), plus
+    #      the with-site businesses, so we get phone + email for both.
     hunter_key = get_hunter_key()
     if hunter_key and businesses_with_site:
         enrich_result = enrich_workflow(businesses_with_site[:20], hunter_key)
         report["enrich"] = {
             "enriched": enrich_result["enriched_count"],
             "total": len(businesses_with_site),
+            "method": "hunter",
         }
-        # Merge enrichment data back into no_site list
         enrich_map = {r["name"]: r for r in enrich_result["results"]}
         for b in search["no_site"]:
             if b["name"] in enrich_map and enrich_map[b["name"]].get("found"):
                 b["email"] = enrich_map[b["name"]]["email"]
+    else:
+        maps_targets = list(search["no_site"])
+        if businesses_with_site:
+            maps_targets.extend(businesses_with_site[:20])
+        if maps_targets:
+            maps_result = enrich_workflow(maps_targets, "")
+            report["enrich"] = {
+                "enriched": maps_result["enriched_count"],
+                "phone_found": maps_result.get("phone_found", 0),
+                "total": len(maps_targets),
+                "method": "maps_fallback",
+            }
+
+    # Phone/email export for later WhatsApp messaging — written from the
+    # enriched business list so it's available as soon as enrichment completes.
+    phones_csv = ""
+    try:
+        if search["businesses"]:
+            phones_csv = write_phones_csv(search["businesses"])
+    except Exception:
+        phones_csv = ""
 
     # Return here — caller handles selection + send + sync
     report["businesses"] = search["businesses"]
     report["no_site"] = search["no_site"]
     report["with_site"] = search["with_site"]
+    report["phones_csv"] = phones_csv
     return report
 
 
 def complete_outreach(selected: list[dict], session_id: str,
-                      project_name: str, sender_name: str) -> dict:
+                      project_name: str, sender_name: str,
+                      research_data: list[dict] = None) -> dict:
     """Complete the outreach: draft, PDF, website, Obsidian sync.
-    
+
     Called after user selects businesses. Returns full results.
+
+    research_data: results from research_workflow. If omitted, the research
+    already persisted for this session is used — drafting never ignores
+    research the pipeline just spent minutes gathering.
+    Drafts are saved to the session so review/send finds them afterwards.
     """
     result = {
         "drafts": [], "errors": [], "sync": {},
     }
 
+    if research_data is None and session_id:
+        research_data = load_session_data(
+            session_id, "research.json").get("research", [])
+
     # Draft emails + PDFs + websites
-    draft_result = draft_and_pdf_workflow(selected, sender_name)
+    draft_result = draft_and_pdf_workflow(selected, sender_name, research_data)
     result["drafts"] = draft_result["drafts"]
     result["errors"] = draft_result["errors"]
     result["ai_used"] = draft_result.get("ai_used", 0)
+
+    # Persist drafts so 'review emails' / 'send' work after quick outreach
+    if session_id and result["drafts"]:
+        try:
+            save_session_data(session_id, {
+                "drafts": [trim_draft_for_storage(d) for d in result["drafts"]],
+            }, "email_drafts.json")
+        except Exception:
+            pass  # persistence failure must not break the run
 
     # Sync to Obsidian
     sync_result = obsidian_sync_workflow(
@@ -529,6 +762,21 @@ def complete_outreach(selected: list[dict], session_id: str,
     result["sync"] = sync_result
 
     return result
+
+
+def trim_draft_for_storage(draft: dict) -> dict:
+    """Lighten a draft before saving it to session JSON.
+
+    Keeps all email fields (to/subject/body/pdf_path/attachment/approved),
+    but replaces the bulky full 'business' object with a slim subset so the
+    email review UI can still show the target's name/category.
+    """
+    out = dict(draft)
+    biz = draft.get("business")
+    if isinstance(biz, dict):
+        slim = {k: biz.get(k) for k in ("name", "category", "address") if biz.get(k)}
+        out["business"] = slim
+    return out
 
 
 def setup_hunter_key(key: str) -> dict:

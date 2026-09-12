@@ -9,6 +9,7 @@ from agents.workflows import (
     search_businesses_workflow, enrich_workflow, select_businesses_workflow,
     draft_and_pdf_workflow, send_emails_workflow, review_and_send_workflow,
     research_workflow, obsidian_sync_workflow, complete_outreach,
+    trim_draft_for_storage,
 )
 
 
@@ -75,7 +76,8 @@ def run_quick_outreach(session):
         status_badge("complete", f"Researched {len(researched)} businesses")
 
     spinner(f"Generating {len(selected)} emails + PDFs", 1.0)
-    result = complete_outreach(selected, session_ref.id, session_ref.name, sender)
+    result = complete_outreach(selected, session_ref.id, session_ref.name, sender,
+                               research_data=research_data)
 
     drafts = result.get("drafts", [])
     errors = result.get("errors", [])
@@ -257,8 +259,8 @@ def run_step_draft(session):
     result = draft_and_pdf_workflow(selected, sender, research_data)
     from agents.ui import show_draft_summary
     show_draft_summary(result)
-    session.save_data({"drafts": [{k: v for k, v in d.items() if k != "business"}
-                                  for d in result["drafts"]]}, "email_drafts.json")
+    session.save_data({"drafts": [trim_draft_for_storage(d) for d in result["drafts"]]},
+                      "email_drafts.json")
 
 
 def run_step_review_send(session):

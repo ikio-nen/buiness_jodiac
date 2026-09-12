@@ -4,7 +4,14 @@ Provides a single generate() function that all AI agents call.
 Falls back to None if no API key is configured.
 """
 import json
+import time
 from agents.config import get_gemini_key, get_ai_model
+
+# Transient API failures worth retrying (503 under load per our AGENTS.md notes).
+# Anything else (bad key, dead model 404) fails fast -- no point burning time.
+_RETRY_MARKERS = ("503", "500", "504", "429", "deadline", "unavailable",
+                  "exhausted", "timeout", "internal error", "reset")
+_MAX_ATTEMPTS = 3
 
 
 _client = None
@@ -32,31 +39,44 @@ def is_available() -> bool:
 
 def generate(prompt: str, system: str = "", model: str = "",
              temperature: float = 0.7, max_tokens: int = 4096) -> str:
-    """Generate text from a prompt. Returns empty string on failure."""
+    """Generate text from a prompt. Returns empty string on failure.
+
+    Retries transient API failures (503/429/timeout) with a short backoff;
+    permanent failures (bad key, dead model) return immediately.
+    """
     client = _get_client()
     if not client:
         return ""
 
     model = model or get_ai_model()
 
-    try:
-        from google.genai import types
-        config = types.GenerateContentConfig(
-            temperature=temperature,
-            max_output_tokens=max_tokens,
-        )
-        if system:
-            config.system_instruction = system
+    from google.genai import types
+    config = types.GenerateContentConfig(
+        temperature=temperature,
+        max_output_tokens=max_tokens,
+    )
+    if system:
+        config.system_instruction = system
 
-        response = client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=config,
-        )
-        return response.text or ""
-    except Exception as e:
-        print(f"  [AI] Generation error: {e}")
-        return ""
+    last_err: Exception | None = None
+    for attempt in range(_MAX_ATTEMPTS):
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=config,
+            )
+            return response.text or ""
+        except Exception as e:
+            last_err = e
+            msg = str(e).lower()
+            transient = any(marker in msg for marker in _RETRY_MARKERS)
+            if not transient or attempt == _MAX_ATTEMPTS - 1:
+                break
+            time.sleep(1.5 * (attempt + 1))  # 1.5s, 3s
+
+    print(f"  [AI] Generation error: {last_err}")
+    return ""
 
 
 def generate_json(prompt: str, system: str = "", model: str = "") -> dict:

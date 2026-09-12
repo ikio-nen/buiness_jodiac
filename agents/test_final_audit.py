@@ -1,4 +1,5 @@
 import sys, os, json
+import unittest.mock
 sys.path.insert(0, '.')
 
 results = {}
@@ -76,15 +77,15 @@ try:
     from agents.obsidian_sync import create_project_note, create_contact_note, create_outreach_form, update_vault_index
     p1 = create_project_note('t2', 'TP', [{'name': 'BA', 'category': 'food', 'phone': '', 'address': ''}, {'name': 'BB', 'category': 'retail', 'phone': '', 'address': ''}])
     c1 = open(p1, encoding='utf-8').read()
-    assert '[[t2_ba' in c1
-    assert '[[t2_bb' in c1
+    assert '[[ba.md|BA]]' in c1, 'project note should link contact as [[ba.md|BA]]'
+    assert '[[bb.md|BB]]' in c1
     assert '[[outreach_t2' in c1
     p2 = create_contact_note({'name': 'BA', 'category': 'food', 'phone': '', 'address': ''}, session_id='t2', project_name='TP')
     c2 = open(p2, encoding='utf-8').read()
     assert '[[t2_tp' in c2
     p3 = create_outreach_form('t2', [{'name': 'BA'}], 'TP')
     c3 = open(p3, encoding='utf-8').read()
-    assert '[[t2_ba' in c3
+    assert '[[ba.md|BA]]' in c3, 'outreach form should link contact as [[ba.md|BA]]'
     idx = update_vault_index()
     ci = open(idx, encoding='utf-8').read()
     assert '[[t2_tp' in ci
@@ -125,7 +126,67 @@ try:
 except Exception as e:
     results['jarvis_entry'] = f'FAIL: {e}'
 
-# 12. Dead handler rejection
+# 12b. AI -> template fallback chain (ai_design raises; orchestrator falls back)
+try:
+    from agents.ai_design import AIDesignAgent
+    ai_agent = AIDesignAgent()
+    bad = Task(id='ai1', name='ai_draft_email', complexity=Complexity.HEAVY,
+               payload={'business_name': 'Fallback Co', 'category': 'retail',
+                        'email': 'x@y.com', 'learning_context': ''},
+               context={'sender_name': 'The Team'})
+    with __import__('unittest').mock.patch(
+            'agents.ai_engine.generate_json', return_value={}):
+        r = ai_agent.handle(bad)
+        # _draft_email must RAISE (so handle() reports failure), not return
+        # an {"error": ...} dict that would pass as a fake success.
+        assert not r.success, 'ai_draft_email should fail when AI output is empty'
+    # Orchestrator-level fallback: with AI 'unavailable', run() must land on
+    # the template drafter, not return an empty draft.
+    o3 = Orchestrator()
+    with __import__('unittest').mock.patch('agents.ai_engine.is_available', return_value=False):
+        r2 = o3.run('ai_draft_email', {
+            'business_name': 'Fallback Co', 'category': 'retail',
+            'email': 'x@y.com', 'learning_context': ''},
+            context={'sender_name': 'The Team'})
+    assert r2.success, f'ai->template fallback failed: {r2.error}'
+    assert r2.output.get('body'), 'fallback draft has no body'
+    assert 'Fallback Co' in r2.output['body']
+    results['ai_fallback_chain'] = 'OK (raise->template verified)'
+except Exception as e:
+    results['ai_fallback_chain'] = f'FAIL: {e}'
+
+# 12c. complete_outreach persists drafts + uses session research
+try:
+    from agents.config import load_session_data
+    from agents.workflows import complete_outreach
+    import agents.workflows as wf
+    sid = Session().create('audit_co_test')
+    s2 = Session()
+    s2.load(sid, {})
+    s2.save_research([{'name': 'PersistCo', 'rating': 4.2, 'review_count': 11,
+                       'strengths': ['great service'], 'gaps': ['no website'],
+                       'email_hook': 'Nice reviews!', 'improvement_suggestion': 'site'}])
+    saved = []
+    with __import__('unittest').mock.patch.object(
+            wf, 'draft_and_pdf_workflow',
+            return_value={'drafts': [{'to': 'a@b.c', 'subject': 'Hi', 'body': 'Test',
+                                      'business': {'name': 'PersistCo', 'category': 'retail'}}],
+                          'errors': [], 'ai_used': 0}) as m:
+        res = complete_outreach([{'name': 'PersistCo'}], sid, 'proj', 'Tester')
+        _, kwargs = m.call_args
+        # Research must have been pulled from the persisted session file
+        assert kwargs.get('research_data') or (len(m.call_args.args) > 2 and m.call_args.args[2]), \
+            'complete_outreach did not pass research into drafting'
+        assert kwargs.get('research_data', m.call_args.args[2] if len(m.call_args.args) > 2 else None) and \
+            kwargs.get('research_data', m.call_args.args[2])[0]['name'] == 'PersistCo'
+    persisted = load_session_data(sid, 'email_drafts.json')
+    assert persisted.get('drafts'), 'drafts were not saved to the session'
+    assert persisted['drafts'][0]['subject'] == 'Hi'
+    results['complete_outreach_persistence'] = 'OK (research in, drafts saved)'
+except Exception as e:
+    results['complete_outreach_persistence'] = f'FAIL: {e}'
+
+# 13. Dead handler rejection
 try:
     o2 = Orchestrator()
     task1 = Task(id='dr1', name='generate_proposal', complexity=Complexity.HEAVY, payload={})

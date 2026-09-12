@@ -134,7 +134,31 @@ Business details:
 
     # ── Email Drafting ─────────────────────────────────────────────────
 
+    # Per-business web search is capped: one search per business, short
+    # timeout, truncated results. "I don't care how long it takes" covers
+    # research depth -- not unbounded scraping.
+    _WEB_SEARCH_MAX_CHARS = 900
+
+    def _web_research_snippet(self, biz_name: str, category: str) -> str:
+        """One capped web search for this business's public reputation.
+
+        Best-effort: returns '' on any failure so drafting proceeds on
+        scraped reviews + brain memory alone.
+        """
+        try:
+            from .agent_team import web_search
+            results = web_search(f"{biz_name} {category} reviews reputation", timeout=10)
+            return results[:self._WEB_SEARCH_MAX_CHARS] if results else ""
+        except Exception:
+            return ""
+
     def _draft_email(self, payload: dict, ctx: dict) -> dict:
+        """Draft one email with every context layer we have.
+
+        Raises on failure so the orchestrator's ai_* -> template fallback
+        engages -- returning an {"error": ...} dict would flow into the
+        drafts list as a fake success (handle() marks any dict a success).
+        """
         from . import ai_engine
 
         biz_name = payload.get("business_name", "the business")
@@ -142,46 +166,47 @@ Business details:
         category = payload.get("category", "")
         sender_name = ctx.get("sender_name", "The Team")
 
+        # Layer 1: tone + business profile import
+        from .config import get_business_context, get_email_tone
+        tone = get_email_tone() or "professional"
+
         # Build learning-enhanced prompt
         learning_ctx = payload.get("learning_context", "")
+        # Layer 2: learning context -- research + brain memory, already
+        # assembled by the workflow with clear section markers.
         learning_section = ""
-        research_section = ""
         if learning_ctx:
-            # Check if research data is included
-            if "Research on this specific business" in learning_ctx:
-                parts = learning_ctx.split("--- Research on this specific business ---")
-                industry_ctx = parts[0].strip() if parts[0].strip() else ""
-                research_ctx = parts[1].strip() if len(parts) > 1 else ""
-                if industry_ctx:
-                    learning_section = f"\n\nWhat we've learned about {category} businesses:\n{industry_ctx}\n\nUse this knowledge to make the email more relevant and effective."
-                if research_ctx:
-                    research_section = f"\n\nResearch on {biz_name} specifically:\n{research_ctx}\n\nUse these specific insights to personalize the email. Reference their rating, strengths, or improvement opportunities."
-            else:
-                learning_section = f"\n\nWhat we've learned about {category} businesses:\n{learning_ctx}\n\nUse this knowledge to make the email more relevant and effective."
+            learning_section = (f"\n\nEverything we know about this business:\n{learning_ctx}\n"
+                                "Reference their rating, strengths or gaps naturally -- "
+                                "follow up if we've emailed them before.")
 
-        # Get business profile for personalized emails
-        from .config import get_business_context
+        # Layer 3: business profile (what we sell, who we target)
         biz_profile = get_business_context()
         profile_section = ""
         if biz_profile:
-            profile_section = f"\n\nAbout our business:\n{biz_profile}\n\nTailor the email to what we actually sell and who we target."
+            profile_section = f"\n\nAbout our business:\n{biz_profile}\nTailor the email to what we actually sell and who we target."
 
-        # Get industry insights for this business type
+        # Layer 4: industry insights
         from .industry_learner import build_industry_context
         industry_ctx = build_industry_context(category)
         industry_section = ""
         if industry_ctx:
-            industry_section = f"\n\nIndustry insights:\n{industry_ctx}\n\nUse the pain points and approach in your email."
+            industry_section = f"\n\nIndustry insights:\n{industry_ctx}\nUse the pain points and approach in your email."
 
-        prompt = f"""Write a short, professional cold-outreach email to {contact_name or 'a business owner'} 
-at {biz_name} ({category} business).
+        # Layer 5: one capped web search for public reputation
+        web_snippet = self._web_research_snippet(biz_name, category)
+        web_section = ""
+        if web_snippet:
+            web_section = f"\n\nRecent public web results about them:\n{web_snippet}\nUse anything concrete (news, reputation, offerings) -- ignore anything irrelevant."
+
+        prompt = f"""Write a short, professional cold-outreach email to {contact_name or 'a business owner'} at {biz_name} ({category} business).
 
 Goal: Reach out with a relevant offer based on what we sell. Keep it:
 - Under 150 words
-- Friendly but professional
+- {tone} tone
 - One clear call to action (quick 5-min chat)
 - Personalised to their industry ({category})
-- Reference what we actually sell and why they need it{learning_section}{research_section}{profile_section}{industry_section}
+- Reference what we actually sell and why they need it{profile_section}{industry_section}{learning_section}{web_section}
 
 From: {sender_name}
 
@@ -189,12 +214,12 @@ Return ONLY a JSON object with these keys:
 {{"subject": "...", "body": "...", "greeting": "...", "hook": "..."}}"""
 
         result = ai_engine.generate_json(prompt)
-        if result and "subject" in result:
-            result["to"] = payload.get("email", "")
-            result["ai_powered"] = True
-            return result
+        if not (result and result.get("subject") and result.get("body")):
+            raise ValueError("AI email generation failed: empty or malformed response")
 
-        return {"error": "AI generation failed", "ai_powered": False}
+        result["to"] = payload.get("email", "")
+        result["ai_powered"] = True
+        return result
 
     # ── Proposal Content ───────────────────────────────────────────────
 

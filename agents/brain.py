@@ -32,7 +32,7 @@ from agents.config import OUTPUT_DIR
 BRAIN_DIR = OUTPUT_DIR / "brain"
 
 # Ensure directories exist
-for subdir in ["industries", "locations", "strategies", "sessions", "insights"]:
+for subdir in ["industries", "locations", "strategies", "sessions", "insights", "businesses"]:
     (BRAIN_DIR / subdir).mkdir(parents=True, exist_ok=True)
 
 
@@ -43,8 +43,90 @@ class Brain:
         self._ensure_dirs()
 
     def _ensure_dirs(self):
-        for subdir in ["industries", "locations", "strategies", "sessions", "insights"]:
+        for subdir in ["industries", "locations", "strategies", "sessions", "insights", "businesses"]:
             (BRAIN_DIR / subdir).mkdir(parents=True, exist_ok=True)
+
+    # ── Per-business knowledge (one file per business) ────────────
+
+    def _biz_path(self, name: str) -> Path:
+        key = name.lower().strip().replace(" ", "_").replace("'", "").replace(".", "").replace("&", "and")
+        return BRAIN_DIR / "businesses" / f"{key}.json"
+
+    def get_business(self, name: str) -> dict:
+        return self._read(self._biz_path(name))
+
+    def learn_business(self, name: str, category: str = "",
+                       facts: dict = None, interaction: dict = None,
+                       source: str = "") -> dict:
+        """Accumulate knowledge about one specific business.
+
+        facts: research/scrape findings (rating, reviews, gaps, strengths...)
+        interaction: what happened between us (sent, replied, call planned...)
+        Returns the updated record.
+        """
+        rec = self.get_business(name)
+        rec["name"] = name
+        if category:
+            rec["category"] = category
+        rec["updated_at"] = datetime.now().isoformat()
+        rec["times_seen"] = rec.get("times_seen", 0) + 1
+
+        for k, v in (facts or {}).items():
+            if v in (None, "", []):
+                continue
+            existing = rec.get(k)
+            if isinstance(existing, list) and isinstance(v, list):
+                merged = list(dict.fromkeys(existing + v))
+                rec[k] = merged[:10]
+            else:
+                rec[k] = v
+
+        if interaction:
+            interaction["timestamp"] = datetime.now().isoformat()
+            if source:
+                interaction["source"] = source
+            rec.setdefault("interactions", []).append(interaction)
+            rec["interactions"] = rec["interactions"][-20:]
+
+        self._write(self._biz_path(name), rec)
+        return rec
+
+    def get_business_context(self, name: str) -> str:
+        """Compact per-business context for AI prompts."""
+        rec = self.get_business(name)
+        if not rec:
+            return ""
+        parts = [f"What we know about {rec.get('name', name)}:"]
+        if rec.get("category"):
+            parts.append(f"  Category: {rec['category']}")
+        if rec.get("rating"):
+            parts.append(f"  Google rating: {rec['rating']} ({rec.get('review_count', 0)} reviews)")
+        for k in ("strengths", "gaps"):
+            if rec.get(k):
+                parts.append(f"  {k.title()}: " + "; ".join(rec[k][:3]))
+        if rec.get("email_hook"):
+            parts.append(f"  Hook that fits: {rec['email_hook']}")
+        if rec.get("phone"):
+            parts.append(f"  Phone on file: {rec['phone']}")
+        if rec.get("email"):
+            parts.append(f"  Email on file: {rec['email']}")
+        interactions = rec.get("interactions", [])
+        if interactions:
+            last = interactions[-1]
+            parts.append(f"  Last interaction: {last.get('type', '?')} at {last.get('timestamp', '?')[:10]}")
+        if rec.get("notes"):
+            parts.append(f"  Notes: {rec['notes'][:200]}")
+        return "\n".join(parts)
+
+    def list_businesses(self) -> list[dict]:
+        """All businesses the brain knows, newest-updated first."""
+        out = []
+        for f in (BRAIN_DIR / "businesses").glob("*.json"):
+            rec = self._read(f)
+            if rec:
+                out.append(rec)
+        out.sort(key=lambda r: r.get("updated_at", ""), reverse=True)
+        return out
 
     def _read(self, path: Path) -> dict:
         if path.exists():
@@ -278,6 +360,18 @@ class Brain:
                 ctx = self.get_industry_context(ind)
                 if ctx:
                     parts.append(ctx)
+
+        # Known businesses (the ones we've actually interacted with)
+        known = self.list_businesses()
+        if known:
+            parts.append(f"\nBUSINESSES WE KNOW ({len(known)}):")
+            for rec in known[:10]:
+                line = f"  {rec.get('name', '?')} ({rec.get('category', '?')})"
+                if rec.get("phone"):
+                    line += f" phone={rec['phone']}"
+                if rec.get("interactions"):
+                    line += f" last={rec['interactions'][-1].get('type', '?')}"
+                parts.append(line)
 
         # Recent insights
         insights = self.get_insights()

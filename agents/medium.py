@@ -119,6 +119,36 @@ class MediumAgent(BaseAgent):
         product = profile.get("product", "professional websites")
         value_prop = profile.get("value_proposition", "Most of our clients see a noticeable uptick in calls and visits within the first month.")
 
+        # Per-business brain memory (rating, gaps, past contact): cite what we
+        # know about THIS business, and follow up if we already emailed them.
+        brain_facts = {}
+        in_brain = False
+        for line in learning_ctx.split("\n"):
+            if "--- Brain memory" in line:
+                in_brain = True
+                continue
+            if in_brain:
+                s = line.strip()
+                if s.startswith("---"):
+                    break
+                if ":" in s:
+                    k, v = s.split(":", 1)
+                    brain_facts[k.strip().lower()] = v.strip()
+
+        memory_lines = []
+        rating = brain_facts.get("google rating", "").split(" (")[0]
+        if rating:
+            memory_lines.append(f"I see {biz_name} holds a {rating} rating on Google - clearly a business people trust.")
+        gaps = brain_facts.get("gaps", "")
+        if gaps:
+            first_gap = gaps.split(";")[0].strip().rstrip(".")
+            memory_lines.append(f"One thing I noticed: {first_gap.lower()} - that's exactly what we help with.")
+        memory_section = ("\n" + "\n".join(memory_lines) + "\n") if memory_lines else ""
+
+        cta = "Would you be open to a quick 5-minute chat this week?"
+        if brain_facts.get("last interaction", "").startswith("emailed"):
+            cta = "I reached out recently and wanted to follow up - would a quick 5-minute chat this week work?"
+
         # Get industry pain points for a more relevant email
         from .industry_learner import get_or_research_industry
         industry = get_or_research_industry(category)
@@ -129,9 +159,8 @@ class MediumAgent(BaseAgent):
 
 {hook}{pain_section}
 
-We offer {product} - no templates, no hassle. {value_prop}
-
-Would you be open to a quick 5-minute chat this week?
+We offer {product} - no templates, no hassle. {value_prop}{memory_section}
+{cta}
 
 Best,
 {sender_name}"""

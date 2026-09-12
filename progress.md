@@ -50,3 +50,23 @@ Tested:
 ### Next
 - Wire action_dispatch into web server WebSocket handler
 - Test full pipeline: search -> research -> draft -> send
+
+### Brain Context Injection into System Prompt
+**Date:** 2026-09-03
+**Status:** Complete and verified
+
+What was done:
+1. Wired `brain.get_full_context()` into `chatbot._build_system_prompt()` 
+2. Brain context flows as `BRAIN KNOWLEDGE:` section in Gemini system prompt
+3. Seeded brain with AutoCAD profile from config.json
+4. Tested: profile, industry knowledge, insights, strategies all appear in prompt
+5. Tested edge case: empty brain doesn't crash (graceful degradation)
+6. Gemini now sees: what we sell, who we target, pain points, what worked, insights
+
+Verified:
+- System prompt includes 1,065 chars of brain context
+- Empty brain produces valid prompt (496 chars baseline)
+- Session state + brain context both inject correctly
+- Brain data persists across restarts (JSON files)
+
+Git: commit 1dbc2ae

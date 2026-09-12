@@ -618,3 +618,94 @@ html, body {
   .chat-area { padding: 12px; }
   .input-area { padding: 8px 12px 12px; }
 }
+ 
+
+/* Email Review Card */
+
+#reviewCard .data-card {
+  max-width: 100%;
+  width: 100%;
+}
+
+.review-biz {
+  font-size: 13px;
+  color: var(--cyan);
+  margin-bottom: 8px;
+}
+
+.review-field {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+}
+
+.review-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--white-dim);
+  margin-bottom: 2px;
+}
+
+.review-field input[type="text"],
+.review-field textarea {
+  width: 100%;
+  background: var(--bg);
+  color: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  padding: 6px 8px;
+}
+
+.review-field textarea { resize: vertical; }
+
+.review-field input:disabled { color: var(--white-dim); }
+
+.review-attach {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.review-attach input[type="file"] {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--white-dim);
+}
+
+.review-att-status { font-size: 11px; color: var(--white-dim); }
+
+.review-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.review-btn {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  border-radius: 4px;
+  padding: 7px 14px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  color: var(--white);
+}
+
+.review-btn:hover { border-color: var(--red); }
+.review-btn:disabled { opacity: 0.4; cursor: default; }
+
+.review-btn-approve { border-color: rgba(6, 214, 160, 0.4); color: var(--green); }
+.review-btn-approve:hover { background: rgba(6, 214, 160, 0.12); }
+
+.review-btn-skip { border-color: rgba(255, 209, 102, 0.4); color: var(--yellow); }
+.review-btn-skip:hover { background: rgba(255, 209, 102, 0.12); }
+
+.review-btn-cancel { border-color: rgba(230, 57, 70, 0.4); color: var(--red); }
+.review-btn-cancel:hover { background: rgba(230, 57, 70, 0.12); }

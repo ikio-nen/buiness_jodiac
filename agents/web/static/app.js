@@ -118,6 +118,14 @@ function handleMessage(data) {
       renderResearchResults(data.data);
       break;
 
+    case 'review_show':
+      renderReviewShow(data);
+      break;
+
+    case 'review_result':
+      renderReviewResult(data.data);
+      break;
+
     case 'error':
       addMessage('jarvis', data.content, { error: true });
       break;
@@ -311,6 +319,177 @@ function esc(s) {
   return d.innerHTML;
 }
 
+// ── Interactive Email Review ─────────────────────────────────────
+
+function removeReviewCard() {
+  const el = document.getElementById('reviewCard');
+  if (el) el.remove();
+}
+
+function renderReviewShow(data) {
+  removeReviewCard();
+
+  const msg = document.createElement('div');
+  msg.className = 'message message-jarvis';
+  msg.id = 'reviewCard';
+
+  const label = document.createElement('div');
+  label.className = 'msg-label';
+  label.textContent = 'JARVIS';
+
+  const card = document.createElement('div');
+  card.className = 'data-card';
+
+  const title = document.createElement('div');
+  title.className = 'data-card-title';
+  title.textContent = `EMAIL REVIEW (${data.index + 1}/${data.total})`;
+  card.appendChild(title);
+
+  const bizLine = document.createElement('div');
+  bizLine.className = 'review-biz';
+  bizLine.textContent = data.business || 'Business';
+  if (data.ai_powered) {
+    const tag = document.createElement('span');
+    tag.className = 'tag tag-green';
+    tag.textContent = 'AI';
+    bizLine.appendChild(document.createTextNode(' '));
+    bizLine.appendChild(tag);
+  }
+  card.appendChild(bizLine);
+
+  const makeField = (labelText, control) => {
+    const row = document.createElement('div');
+    row.className = 'review-field';
+    const l = document.createElement('div');
+    l.className = 'review-label';
+    l.textContent = labelText;
+    row.appendChild(l);
+    row.appendChild(control);
+    return row;
+  };
+
+  const toBox = document.createElement('input');
+  toBox.type = 'text';
+  toBox.value = data.to || '';
+  toBox.disabled = true;
+  card.appendChild(makeField('To', toBox));
+
+  const subjectBox = document.createElement('input');
+  subjectBox.type = 'text';
+  subjectBox.value = data.subject || '';
+  card.appendChild(makeField('Subject', subjectBox));
+
+  const bodyBox = document.createElement('textarea');
+  bodyBox.rows = 10;
+  bodyBox.value = data.body || '';
+  card.appendChild(makeField('Body', bodyBox));
+
+  // Attachment (uploaded once, applied on approve)
+  let uploadedPath = null;
+  const attRow = document.createElement('div');
+  attRow.className = 'review-field';
+  const attLabel = document.createElement('div');
+  attLabel.className = 'review-label';
+  attLabel.textContent = 'Attachment';
+  const attControls = document.createElement('div');
+  attControls.className = 'review-attach';
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  const attStatus = document.createElement('span');
+  attStatus.className = 'review-att-status';
+  attStatus.textContent = data.attachment_name ? `Current: ${data.attachment_name}` : '';
+
+  fileInput.addEventListener('change', async () => {
+    const f = fileInput.files && fileInput.files[0];
+    if (!f) return;
+    attStatus.textContent = 'Uploading...';
+    try {
+      const fd = new FormData();
+      fd.append('file', f);
+      const res = await fetch('/api/upload', { method: 'POST', body: fd });
+      const j = await res.json();
+      if (j.path) {
+        uploadedPath = j.path;
+        attStatus.textContent = `Attached: ${j.name}`;
+      } else {
+        attStatus.textContent = 'Upload failed.';
+      }
+    } catch (e) {
+      attStatus.textContent = 'Upload error.';
+    }
+  });
+
+  attControls.appendChild(fileInput);
+  attControls.appendChild(attStatus);
+  attRow.appendChild(attLabel);
+  attRow.appendChild(attControls);
+  card.appendChild(attRow);
+
+  // Actions
+  const btnRow = document.createElement('div');
+  btnRow.className = 'review-actions';
+
+  const makeBtn = (text, cls, onClick) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    b.textContent = text;
+    b.addEventListener('click', onClick);
+    return b;
+  };
+
+  const lockButtons = () => {
+    btnRow.querySelectorAll('button').forEach(b => { b.disabled = true; });
+    fileInput.disabled = true;
+  };
+
+  const sendReview = (action, extra) => {
+    lockButtons();
+    ws.send(JSON.stringify(Object.assign({
+      type: 'review_action',
+      index: data.index,
+      action: action,
+    }, extra || {})));
+  };
+
+  btnRow.appendChild(makeBtn('Approve & Next', 'review-btn review-btn-approve', () => {
+    sendReview('approve', {
+      subject: subjectBox.value,
+      body: bodyBox.value,
+      attachment: uploadedPath,
+    });
+  }));
+  btnRow.appendChild(makeBtn('Skip', 'review-btn review-btn-skip', () => {
+    sendReview('skip', {});
+  }));
+  btnRow.appendChild(makeBtn('Cancel Review', 'review-btn review-btn-cancel', () => {
+    removeReviewCard();
+    ws.send(JSON.stringify({ type: 'review_cancel' }));
+  }));
+  card.appendChild(btnRow);
+
+  msg.appendChild(label);
+  msg.appendChild(card);
+  messagesEl.appendChild(msg);
+  scrollToBottom();
+}
+
+function renderReviewResult(d) {
+  const data = d || {};
+  let html = `<div class="data-card"><div class="data-card-title">EMAIL REVIEW COMPLETE</div>`;
+  html += `<div style="display:flex;gap:16px;margin-top:4px;">`;
+  html += `<div><span style="color:#06d6a0;font-size:24px;font-weight:700;">${data.approved || 0}</span><div style="font-size:11px;color:#a8a8a8;">Approved</div></div>`;
+  html += `<div><span style="color:#ffd166;font-size:24px;font-weight:700;">${data.skipped || 0}</span><div style="font-size:11px;color:#a8a8a8;">Skipped</div></div>`;
+  html += `<div><span style="color:#e63946;font-size:24px;font-weight:700;">${data.total || 0}</span><div style="font-size:11px;color:#a8a8a8;">Total</div></div>`;
+  html += `</div></div>`;
+
+  const msg = document.createElement('div');
+  msg.className = 'message message-jarvis';
+  msg.innerHTML = `<div class="msg-label">JARVIS</div>${html}`;
+  messagesEl.appendChild(msg);
+  scrollToBottom();
+}
+
 // ── Input Handling ───────────────────────────────────────────────
 
 function sendMessage() {
@@ -443,8 +622,9 @@ statusBtn.addEventListener('click', async () => {
         <div class="status-row"><span class="status-label">Session</span><span class="status-value">${esc(data.session_id || 'None')}</span></div>
         <div class="status-row"><span class="status-label">Name</span><span class="status-value">${esc(data.session_name || 'None')}</span></div>
         <div class="status-row"><span class="status-label">Product</span><span class="status-value">${esc(data.profile?.product || 'Not set')}</span></div>
-        <div class="status-row"><span class="status-label">Target</span><span class="status-value">${esc(data.profile?.target || 'Not set')}</span></div>
+        <div class="status-row"><span class="status-label">Target</span><span class="status-value">${esc(data.profile?.target_customers || 'Not set')}</span></div>
         <div class="status-row"><span class="status-label">Tone</span><span class="status-value">${esc(data.profile?.email_tone || 'professional')}</span></div>
+        <div class="status-row"><span class="status-label">AI Engine</span><span class="status-value">${data.ai_configured ? 'Configured' : 'Not configured'}</span></div>
         <div class="status-row"><span class="status-label">Businesses</span><span class="status-value">${data.businesses_found || 0}</span></div>
         <div class="status-row"><span class="status-label">No Website</span><span class="status-value">${data.businesses_no_site || 0}</span></div>
         <div class="status-row"><span class="status-label">Drafts</span><span class="status-value">${data.drafts_count || 0}</span></div>

@@ -370,8 +370,8 @@ def show_search_results(no_site: list[dict], with_site: list[dict]):
     print(f"  {C.DIM}{C.DARK}{'---':<4} {'---':<30} {'---':<15} {'---':<15} {'-----'}{C.RESET}")
 
     for i, b in enumerate(no_site, 1):
-        has_email = "Yes" if (b.get("email") or b.get("enrichment", {}).get("email")) else "No"
-        email_color = C.GREEN if has_email == "Yes" else C.RED
+        email_addr = b.get("email") or b.get("enrichment", {}).get("email", "")
+        email_color = C.GREEN if email_addr else C.RED
         print(f"  {C.RED}{C.BOLD}{i:<4}{C.RESET} {C.WHITE}{b['name'][:29]:<30}{C.RESET} {C.DIM}{b.get('category', '')[:14]:<15}{C.RESET} {C.DIM}{b.get('phone', '')[:14]:<15}{C.RESET} {email_color}{has_email}{C.RESET}")
 
 

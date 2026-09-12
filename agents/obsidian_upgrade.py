@@ -1,11 +1,112 @@
 """Additional Obsidian vault features — dashboard, timeline, tags reference."""
-from datetime import datetime
+import re
+from datetime import datetime, date
 from pathlib import Path
 from .config import (
     OBSIDIAN_VAULT, OBSIDIAN_PROJECTS, OBSIDIAN_CONTACTS, OBSIDIAN_REPORTS,
     OBSIDIAN_INDUSTRIES, OBSIDIAN_RESEARCH, OBSIDIAN_COMPETITORS,
     OBSIDIAN_FOLLOWUPS, OBSIDIAN_INSIGHTS,
 )
+
+
+def _read(p: Path) -> str:
+    try:
+        return p.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+
+def _frontmatter(content: str) -> dict:
+    """Parse simple key: value frontmatter lines."""
+    out = {}
+    if not content.startswith("---"):
+        return out
+    for line in content.split("\n")[1:]:
+        if line.strip() == "---":
+            break
+        if ":" in line:
+            k, v = line.split(":", 1)
+            out[k.strip()] = v.strip()
+    return out
+
+
+def _contact_filename(name: str) -> str:
+    from .obsidian_sync import _contact_filename as cf
+    return cf(name)
+
+
+def _whatsapp_ready(phone: str) -> bool:
+    """A phone is WhatsApp-able if it has enough digits."""
+    return len(re.sub(r"\D", "", phone)) >= 10
+
+
+def channel_intelligence() -> dict:
+    """Compute channel-reachability and follow-up urgency from vault content.
+
+    Reads every contact + follow-up note. Returns:
+        contacts: total, email_ready, whatsapp_ready, never_contacted,
+                  phone_source_breakdown {osm, maps, osm+maps}
+        followups: pending, overdue [{name, link, days_late}]
+    """
+    contacts = sorted(OBSIDIAN_CONTACTS.glob("*.md"))
+    followups = sorted(OBSIDIAN_FOLLOWUPS.glob("*.md"))
+
+    email_ready = whatsapp_ready = never_contacted = 0
+    phone_sources = {}
+    whatsapp_list = []
+
+    for c in contacts:
+        fm = _frontmatter(_read(c))
+        email = fm.get("email", "")
+        phone = fm.get("phone", "")
+        if email:
+            email_ready += 1
+        if _whatsapp_ready(phone):
+            whatsapp_ready += 1
+            whatsapp_list.append((fm.get("business", c.stem), phone, fm.get("phone_source", "")))
+        src = fm.get("phone_source", "")
+        if src:
+            phone_sources[src] = phone_sources.get(src, 0) + 1
+        if fm.get("approached") != "true":
+            never_contacted += 1
+
+    pending = 0
+    overdue = []
+    today = date.today()
+    for f in followups:
+        content = _read(f)
+        fm = _frontmatter(content)
+        if fm.get("status") != "pending":
+            continue
+        pending += 1
+        # Overdue = follow-up note created >2 days ago and still pending
+        m = re.search(r"date:\s*(\d{4})-(\d{2})-(\d{2})", content)
+        if m:
+            created = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            days = (today - created).days
+            if days > 2:
+                name = fm.get("business", f.stem)
+                overdue.append({
+                    "name": name,
+                    "link": f.stem,
+                    "days_late": days,
+                })
+    overdue.sort(key=lambda x: -x["days_late"])
+
+    return {
+        "contacts": {
+            "total": len(contacts),
+            "email_ready": email_ready,
+            "whatsapp_ready": whatsapp_ready,
+            "never_contacted": never_contacted,
+            "phone_source_breakdown": phone_sources,
+            "whatsapp_list": whatsapp_list,
+        },
+        "followups": {
+            "pending": pending,
+            "overdue": overdue,
+        },
+    }
 
 
 def create_dashboard() -> str:
@@ -50,6 +151,11 @@ def create_dashboard() -> str:
 
     total_research = len([r for r in research if r.stem.startswith("research_") and r.stem != "research_"])
 
+    # Channel + follow-up intelligence (computed from note content)
+    intel = channel_intelligence()
+    ci = intel["contacts"]
+    fi = intel["followups"]
+
     lines = [
         "---",
         f"date: {date}",
@@ -73,6 +179,42 @@ def create_dashboard() -> str:
         f"| Competitors | {len(competitors)} |",
         f"| Reports | {len(reports)} |",
         f"| Insights | {len(insights)} |",
+        f"\n## Channel Reachability\n",
+        f"| Channel | Contacts |",
+        f"|---------|----------|",
+        f"| Email-ready | {ci['email_ready']}/{ci['total']} |",
+        f"| WhatsApp-ready | {ci['whatsapp_ready']}/{ci['total']} |",
+        f"| Never contacted | {ci['never_contacted']} |",
+    ]
+
+    if ci["phone_source_breakdown"]:
+        lines.append("")
+        src_parts = [f"{k}: {v}" for k, v in sorted(ci["phone_source_breakdown"].items())]
+        lines.append(f"*Phone sources — {', '.join(src_parts)}*")
+
+    if ci["whatsapp_list"]:
+        lines.append("")
+        lines.append("**WhatsApp targets (send manually anytime):**")
+        for name, phone, src in ci["whatsapp_list"][:10]:
+            lines.append(f"- {phone} — [[{_contact_filename(name)}|{name}]]" + (f" _({src})_" if src else ""))
+        if len(ci["whatsapp_list"]) > 10:
+            lines.append(f"- *...and {len(ci['whatsapp_list']) - 10} more*")
+
+    lines += [
+        f"\n## What To Do Next\n",
+    ]
+    if fi["overdue"]:
+        worst = fi["overdue"][0]
+        lines.append(f"1. **{len(fi['overdue'])} overdue follow-up(s)** — oldest: "
+                     f"[[{worst['link']}|{worst['name']}]] ({worst['days_late']} days)")
+    elif fi["pending"]:
+        lines.append(f"1. {fi['pending']} follow-up(s) pending — none overdue yet")
+    else:
+        lines.append("1. No pending follow-ups")
+    lines.append(f"2. {ci['never_contacted']} contact(s) never approached — "
+                 f"{ci['email_ready']} reachable by email, {ci['whatsapp_ready']} by WhatsApp")
+    lines.append("")
+    lines += [
         f"\n## Quick Actions\n",
         "- [[00 - Index|Vault Index]]",
         "- [[04 - Brain Map|Brain Map]]",

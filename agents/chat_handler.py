@@ -25,6 +25,13 @@ def run_chat_mode(session):
     p("  Type 'exit' to return to menu.", C.DIM)
     print()
     typing_print("Online. What would you like to do?", C.CYAN, delay=0.04)
+
+    # Always-active agents: proactive briefing at chat start
+    from agents.proactive import auto_brief
+    briefing = auto_brief()
+    if briefing:
+        print()
+        typing_print(briefing, C.YELLOW, delay=0.02)
     print()
 
     memory = get_memory(session_id=session.id if session.active else "")
@@ -81,6 +88,18 @@ def run_chat_mode(session):
                 info("No sessions yet.")
             continue
 
+        if action.type == ActionType.REVIEW:
+            _run_cli_review(session)
+            continue
+
+        if action.type == ActionType.CHECKIN:
+            from agents.proactive import check_in, format_briefing
+            briefing = format_briefing(check_in())
+            typing_print(f"JARVIS: {briefing}", C.CYAN, delay=0.02)
+            memory.add_message("jarvis", briefing)
+            print()
+            continue
+
         if action.type == ActionType.UNKNOWN:
             warn(action.response)
             continue
@@ -123,6 +142,33 @@ def run_chat_mode(session):
             error(f"Error: {type(e).__name__}: {e}")
 
         print()
+
+
+def _run_cli_review(session):
+    """Interactive email review for chat mode. Approved drafts are flagged and
+    saved back to the session; sending is a separate 'send' step."""
+    from agents.email_review import review_and_edit_workflow
+    from agents.workflows import trim_draft_for_storage
+
+    data = session.load_data("email_drafts.json") if session.active else {}
+    drafts = data.get("drafts", [])
+    if not drafts:
+        warn("No drafts to review. Draft emails first.")
+        return
+
+    print()
+    result = review_and_edit_workflow(drafts)
+    approved = len(result.get("approved", []))
+    skipped = result.get("skipped_count", 0)
+
+    session.save_data({"drafts": [trim_draft_for_storage(d) for d in drafts]},
+                      "email_drafts.json")
+    print()
+    if approved:
+        success(f"{approved} email(s) approved, {skipped} skipped. "
+                f"Say 'send' to send the approved ones.")
+    else:
+        info("No emails approved. Nothing will be sent.")
 
 
 def _run_brainstorm(session):
