@@ -62,7 +62,7 @@ Total: 14 found — 8 without site, 6 with site.
 
 ## Status / diagnosis (01:05 IST)
 
-- Currency check: through 01:05 the chat was verified unchanged — UI snapshot
+- Currency check: through 01:22 the chat was verified unchanged — UI snapshot
   identical to the capture, 0 new rows in the chat DB after message id 81, and
   no `email_drafts.json` exists in session `20260913_221658`.
 - Last DB-logged action: `enrich` completed 00:51:56 (message id 81).
@@ -78,10 +78,27 @@ Total: 14 found — 8 without site, 6 with site.
 - Side finding: `phones_for_whatsapp_20260914_005019.csv` was written but is EMPTY (0 bytes),
   consistent with "Maps fallback found emails for 0/8, phones for 0/8".
 
+## Resolution (01:28 IST) — not a hang: the draft step was never started
+
+- Re-verified frozen through 01:22 (0 new DB rows, no new fetches). Then the real
+  cause emerged: the last DB row shows the user's message ("do they have emails
+  search and draft a email for eacb one") was parsed as ONE action — `enrich`
+  (the email/phone lookup) only. JARVIS takes one action per message, so the
+  "draft a email for each" half was dropped by the parser. After enrich finished
+  at 00:51:56 the server was simply idle — it looked like a hang but nothing was
+  stuck. The pre-scrape-AI theory was wrong.
+- Proof: running the draft step directly via `dispatch(DRAFT)` completed in ~90s
+  (01:31–01:33): 8/8 emails drafted, 0 errors, AI used 15 calls, `research.json`
+  and `email_drafts.json` written. One transient Gemini 429 (rate limit) hit and
+  the retry handled it. None of the 8 prospects has an email address, so drafts
+  have no `to:` — they're ready for manual follow-up, not for `send`.
+
 ## Open items
 
-- Draft step STUCK — needs restart of the draft action (re-run "draft emails" in the UI
-  after server restart) and a timeout fix in the pre-scrape AI path.
+- Draft step: DONE at 01:33 (8 drafts). Sending blocked on missing email
+  addresses — needs a contact source (Hunter/domain search or manual lookup).
+- Root-cause fix (code): Gemini parser should chain enrich→draft from one
+  message instead of silently dropping the second half.
 - Overdue follow-up: Bandel St. John's High School (11 days) — flagged by agent check-in.
 - 5 new prospects not yet reviewed by agent team ('team act').
 - No emails/phones found for any of the 8 no-site prospects via Google — WhatsApp
