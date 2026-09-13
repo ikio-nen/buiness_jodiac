@@ -126,12 +126,28 @@ def enrich_workflow(businesses: list[dict], hunter_key: str) -> dict:
     Returns {enriched, enriched_count, method, results}."""
     if not hunter_key:
         maps = enrich_with_maps_contacts(businesses)
+
+        # College-style businesses often have no Maps-surfaced email but DO
+        # have an official site with a contact page. Hunt those before
+        # giving up, so drafts get a `to:` address.
+        contact_result = None
+        missing = [b for b in businesses
+                   if not (b.get("email") or b.get("maps_email"))]
+        if missing:
+            try:
+                from agents.contact_finder import find_contacts
+                contact_result = find_contacts(missing)
+            except Exception as e:
+                print(f"  [ENRICH] contact finder failed: {e}")
+
+        contact_found = (contact_result or {}).get("found", 0)
         return {
             "enriched": businesses,
-            "enriched_count": maps["email_found"],
+            "enriched_count": maps["email_found"] + contact_found,
             "skipped": False,
             "method": "maps_fallback",
             "phone_found": maps["phone_found"],
+            "contact_finder": contact_result,
             "maps_results": maps,
             "results": [
                 {

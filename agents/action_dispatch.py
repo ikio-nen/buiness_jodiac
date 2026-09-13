@@ -343,6 +343,15 @@ def _handle_enrich(params: dict, session) -> dict:
                f"phones for {phone_found}/{len(businesses)}")
         if empty and len(empty) == len(businesses):
             msg += " — nothing found (Google did not surface contact info for any of them)"
+        contact = result.get("contact_finder") or {}
+        if contact.get("searched"):
+            if contact.get("found"):
+                hits = ", ".join(
+                    f"{r['name']} → {r['email']}" for r in contact["results"] if r.get("email"))
+                msg += f"\n  [contact] domain hunt found emails for {contact['found']}/{contact['searched']}: {hits}"
+            else:
+                msg += (f"\n  [contact] domain hunt found no emails for "
+                        f"{contact['searched']} businesses — drafts will need manual addresses")
         return {"success": True, "message": msg, "data": result, "live_events": []}
 
     return {
