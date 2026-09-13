@@ -7,10 +7,8 @@ import json
 import time
 from agents.config import get_gemini_key, get_ai_model
 
-# Transient API failures worth retrying (503 under load per our AGENTS.md notes).
-# Anything else (bad key, dead model 404) fails fast -- no point burning time.
-_RETRY_MARKERS = ("503", "500", "504", "429", "deadline", "unavailable",
-                  "exhausted", "timeout", "internal error", "reset")
+# API blips (503s under load) are common -- retry every failure a few times
+# with a short backoff before giving up.
 _MAX_ATTEMPTS = 3
 
 
@@ -41,8 +39,7 @@ def generate(prompt: str, system: str = "", model: str = "",
              temperature: float = 0.7, max_tokens: int = 4096) -> str:
     """Generate text from a prompt. Returns empty string on failure.
 
-    Retries transient API failures (503/429/timeout) with a short backoff;
-    permanent failures (bad key, dead model) return immediately.
+    Retries up to 3 times with a short backoff -- API blips are common.
     """
     client = _get_client()
     if not client:
@@ -58,7 +55,7 @@ def generate(prompt: str, system: str = "", model: str = "",
     if system:
         config.system_instruction = system
 
-    last_err: Exception | None = None
+    last_err = None
     for attempt in range(_MAX_ATTEMPTS):
         try:
             response = client.models.generate_content(
@@ -69,24 +66,22 @@ def generate(prompt: str, system: str = "", model: str = "",
             return response.text or ""
         except Exception as e:
             last_err = e
-            msg = str(e).lower()
-            transient = any(marker in msg for marker in _RETRY_MARKERS)
-            if not transient or attempt == _MAX_ATTEMPTS - 1:
-                break
-            time.sleep(1.5 * (attempt + 1))  # 1.5s, 3s
+            if attempt < _MAX_ATTEMPTS - 1:
+                time.sleep(1.5 * (attempt + 1))  # 1.5s, 3s
 
     print(f"  [AI] Generation error: {last_err}")
     return ""
 
 
-def generate_json(prompt: str, system: str = "", model: str = "") -> dict:
+def generate_json(prompt: str, system: str = "", model: str = "",
+                  temperature: float = 0.3) -> dict:
     """Generate and parse JSON from a prompt. Returns {} on failure."""
     raw = generate(
         prompt=prompt,
         system=(system + "\n\nRespond ONLY with valid JSON. No markdown, no explanation.")
                if system else "Respond ONLY with valid JSON. No markdown, no explanation.",
         model=model,
-        temperature=0.3,
+        temperature=temperature,
     )
     if not raw:
         return {}

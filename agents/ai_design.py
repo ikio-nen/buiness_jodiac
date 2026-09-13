@@ -134,23 +134,8 @@ Business details:
 
     # ── Email Drafting ─────────────────────────────────────────────────
 
-    # Per-business web search is capped: one search per business, short
-    # timeout, truncated results. "I don't care how long it takes" covers
-    # research depth -- not unbounded scraping.
+    # One capped web search per business: short timeout, truncated results.
     _WEB_SEARCH_MAX_CHARS = 900
-
-    def _web_research_snippet(self, biz_name: str, category: str) -> str:
-        """One capped web search for this business's public reputation.
-
-        Best-effort: returns '' on any failure so drafting proceeds on
-        scraped reviews + brain memory alone.
-        """
-        try:
-            from .agent_team import web_search
-            results = web_search(f"{biz_name} {category} reviews reputation", timeout=10)
-            return results[:self._WEB_SEARCH_MAX_CHARS] if results else ""
-        except Exception:
-            return ""
 
     def _draft_email(self, payload: dict, ctx: dict) -> dict:
         """Draft one email with every context layer we have.
@@ -166,35 +151,37 @@ Business details:
         category = payload.get("category", "")
         sender_name = ctx.get("sender_name", "The Team")
 
-        # Layer 1: tone + business profile import
         from .config import get_business_context, get_email_tone
         tone = get_email_tone() or "professional"
 
-        # Build learning-enhanced prompt
+        # Learning context: research + brain memory, assembled by the workflow
+        # with clear section markers.
         learning_ctx = payload.get("learning_context", "")
-        # Layer 2: learning context -- research + brain memory, already
-        # assembled by the workflow with clear section markers.
         learning_section = ""
         if learning_ctx:
             learning_section = (f"\n\nEverything we know about this business:\n{learning_ctx}\n"
                                 "Reference their rating, strengths or gaps naturally -- "
                                 "follow up if we've emailed them before.")
 
-        # Layer 3: business profile (what we sell, who we target)
         biz_profile = get_business_context()
         profile_section = ""
         if biz_profile:
             profile_section = f"\n\nAbout our business:\n{biz_profile}\nTailor the email to what we actually sell and who we target."
 
-        # Layer 4: industry insights
         from .industry_learner import build_industry_context
         industry_ctx = build_industry_context(category)
         industry_section = ""
         if industry_ctx:
             industry_section = f"\n\nIndustry insights:\n{industry_ctx}\nUse the pain points and approach in your email."
 
-        # Layer 5: one capped web search for public reputation
-        web_snippet = self._web_research_snippet(biz_name, category)
+        # One capped web search for public reputation -- best-effort.
+        try:
+            from .agent_team import web_search
+            web_snippet = (web_search(
+                f"{biz_name} {category} reviews reputation", timeout=10)
+                or "")[:self._WEB_SEARCH_MAX_CHARS]
+        except Exception:
+            web_snippet = ""
         web_section = ""
         if web_snippet:
             web_section = f"\n\nRecent public web results about them:\n{web_snippet}\nUse anything concrete (news, reputation, offerings) -- ignore anything irrelevant."

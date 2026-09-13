@@ -17,7 +17,7 @@ from agents.obsidian_sync import (
 from agents.config import (
     get_sender_name, get_hunter_key, set_hunter_key,
     get_gmail_user, OBSIDIAN_VAULT,
-    save_session_data, load_session_data,
+    save_session_data,
 )
 from agents import Orchestrator
 from agents.learn import (
@@ -81,10 +81,12 @@ def search_businesses_workflow(location: str, radius: int,
     # Always search ALL categories for comprehensive results
     businesses = search_businesses(geo["lat"], geo["lon"], radius)
 
-    # Filter by category if specified
+    # Filter by intent if specified. Returns (kept, report) -- the report
+    # travels to the UI so filtering shows its work.
+    filter_report = ""
     if category:
         from agents.category_filter import filter_by_category
-        businesses = filter_by_category(businesses, category)
+        businesses, filter_report = filter_by_category(businesses, category)
     no_site = filter_no_website(businesses)
     with_site = [b for b in businesses if b.get("website")]
 
@@ -101,6 +103,7 @@ def search_businesses_workflow(location: str, radius: int,
         "businesses": verified_businesses,
         "no_site": verified_no_site,
         "with_site": verified_with_site,
+        "filter_report": filter_report,
     }
 
 
@@ -202,9 +205,7 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
 
     Returns {drafts, errors, ai_used}.
     """
-    from agents import ai_engine
     from agents.business_research import format_research_for_email, get_research_for_business
-    use_ai = ai_engine.is_available()
     drafts = []
     errors = []
     ai_count = 0
@@ -254,12 +255,10 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
         except Exception:
             pass
 
-        email_task = "ai_draft_email" if use_ai else "draft_email"
-        # AI first; the orchestrator owns the ai_* -> template fallback and
-        # the agent layer owns raising-vs-falling, so the workflow just runs
-        # one task and reports honestly. (ai_design now raises on failure, so
-        # an ai_ task failing here really does mean both layers failed.)
-        email_result = orch.run(email_task, {
+        # Always the AI task: the orchestrator owns ai_* -> template fallback
+        # and the agent layer raises on failure, so one call site covers
+        # AI-up, AI-down, and AI-error identically.
+        email_result = orch.run("ai_draft_email", {
             "business_name": biz["name"],
             "contact_name": contact_name,
             "email": email,
@@ -277,11 +276,8 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
         # Website — only for businesses without one
         website_path = ""
         if not biz.get("website"):
-            site_task = "ai_generate_website" if use_ai else "generate_website"
             try:
-                # Same single-task policy as email: orchestrator handles the
-                # ai_* -> template fallback, agent layer raises on failure.
-                site_result = orch.run(site_task, {
+                site_result = orch.run("ai_generate_website", {
                     "name": biz["name"],
                     "category": biz.get("category", ""),
                     "address": biz.get("address", ""),
@@ -659,6 +655,7 @@ def run_outreach_pipeline(location: str, radius: int, session_id: str,
         "total": len(search["businesses"]),
         "no_site": len(search["no_site"]),
         "with_site": len(search["with_site"]),
+        "filter_report": search.get("filter_report", ""),
     }
 
     # 2. SCRAPE (Scrapling — get contact details from websites)
@@ -728,18 +725,12 @@ def complete_outreach(selected: list[dict], session_id: str,
 
     Called after user selects businesses. Returns full results.
 
-    research_data: results from research_workflow. If omitted, the research
-    already persisted for this session is used — drafting never ignores
-    research the pipeline just spent minutes gathering.
-    Drafts are saved to the session so review/send finds them afterwards.
+    research_data: results from research_workflow, if any. Drafts are
+    saved to the session so review/send finds them afterwards.
     """
     result = {
         "drafts": [], "errors": [], "sync": {},
     }
-
-    if research_data is None and session_id:
-        research_data = load_session_data(
-            session_id, "research.json").get("research", [])
 
     # Draft emails + PDFs + websites
     draft_result = draft_and_pdf_workflow(selected, sender_name, research_data)

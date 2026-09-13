@@ -1,5 +1,5 @@
-import sys, os, json
-import unittest.mock
+import sys, os, json, shutil
+from unittest import mock
 sys.path.insert(0, '.')
 
 results = {}
@@ -126,7 +126,26 @@ try:
 except Exception as e:
     results['jarvis_entry'] = f'FAIL: {e}'
 
-# 12b. AI -> template fallback chain (ai_design raises; orchestrator falls back)
+# 12b. Retry survives API blips (2 failures then success)
+try:
+    from agents import ai_engine
+    calls = {'n': 0}
+    class _FakeModels:
+        def generate_content(self, **kw):
+            calls['n'] += 1
+            if calls['n'] <= 2:
+                raise Exception('503 overloaded')
+            return type('R', (), {'text': 'ok'})()
+    fake = type('C', (), {'models': _FakeModels()})()
+    with mock.patch.object(ai_engine, '_get_client', return_value=fake), \
+         mock.patch.object(ai_engine.time, 'sleep'):
+        assert ai_engine.generate('p') == 'ok'
+        assert calls['n'] == 3, f'expected 3 attempts, got {calls["n"]}'
+    results['ai_retry'] = 'OK (2 blips then success)'
+except Exception as e:
+    results['ai_retry'] = f'FAIL: {e}'
+
+# 12c. AI failure -> raise -> orchestrator template fallback (no empty draft)
 try:
     from agents.ai_design import AIDesignAgent
     ai_agent = AIDesignAgent()
@@ -134,8 +153,7 @@ try:
                payload={'business_name': 'Fallback Co', 'category': 'retail',
                         'email': 'x@y.com', 'learning_context': ''},
                context={'sender_name': 'The Team'})
-    with __import__('unittest').mock.patch(
-            'agents.ai_engine.generate_json', return_value={}):
+    with mock.patch('agents.ai_engine.generate_json', return_value={}):
         r = ai_agent.handle(bad)
         # _draft_email must RAISE (so handle() reports failure), not return
         # an {"error": ...} dict that would pass as a fake success.
@@ -143,7 +161,7 @@ try:
     # Orchestrator-level fallback: with AI 'unavailable', run() must land on
     # the template drafter, not return an empty draft.
     o3 = Orchestrator()
-    with __import__('unittest').mock.patch('agents.ai_engine.is_available', return_value=False):
+    with mock.patch('agents.ai_engine.is_available', return_value=False):
         r2 = o3.run('ai_draft_email', {
             'business_name': 'Fallback Co', 'category': 'retail',
             'email': 'x@y.com', 'learning_context': ''},
@@ -155,36 +173,83 @@ try:
 except Exception as e:
     results['ai_fallback_chain'] = f'FAIL: {e}'
 
-# 12c. complete_outreach persists drafts + uses session research
+# 12d. complete_outreach: real caller shape (research passed in, drafts saved)
+sid = None
 try:
     from agents.config import load_session_data
     from agents.workflows import complete_outreach
     import agents.workflows as wf
-    sid = Session().create('audit_co_test')
-    s2 = Session()
-    s2.load(sid, {})
-    s2.save_research([{'name': 'PersistCo', 'rating': 4.2, 'review_count': 11,
-                       'strengths': ['great service'], 'gaps': ['no website'],
-                       'email_hook': 'Nice reviews!', 'improvement_suggestion': 'site'}])
-    saved = []
-    with __import__('unittest').mock.patch.object(
+    s = Session()
+    sid = s.create('audit_co_test')
+    research = [{'name': 'PersistCo', 'rating': 4.2, 'review_count': 11,
+                 'strengths': ['great service'], 'gaps': ['no website'],
+                 'email_hook': 'Nice reviews!', 'improvement_suggestion': 'site'}]
+    with mock.patch.object(
             wf, 'draft_and_pdf_workflow',
             return_value={'drafts': [{'to': 'a@b.c', 'subject': 'Hi', 'body': 'Test',
                                       'business': {'name': 'PersistCo', 'category': 'retail'}}],
                           'errors': [], 'ai_used': 0}) as m:
-        res = complete_outreach([{'name': 'PersistCo'}], sid, 'proj', 'Tester')
-        _, kwargs = m.call_args
-        # Research must have been pulled from the persisted session file
-        assert kwargs.get('research_data') or (len(m.call_args.args) > 2 and m.call_args.args[2]), \
-            'complete_outreach did not pass research into drafting'
-        assert kwargs.get('research_data', m.call_args.args[2] if len(m.call_args.args) > 2 else None) and \
-            kwargs.get('research_data', m.call_args.args[2])[0]['name'] == 'PersistCo'
+        complete_outreach([{'name': 'PersistCo'}], sid, 'proj', 'Tester',
+                          research_data=research)
+        # The caller's research must reach drafting (quick-outreach contract)
+        assert m.call_args.args[2] == research, 'research_data not passed through'
     persisted = load_session_data(sid, 'email_drafts.json')
     assert persisted.get('drafts'), 'drafts were not saved to the session'
     assert persisted['drafts'][0]['subject'] == 'Hi'
     results['complete_outreach_persistence'] = 'OK (research in, drafts saved)'
 except Exception as e:
     results['complete_outreach_persistence'] = f'FAIL: {e}'
+finally:
+    if sid:
+        shutil.rmtree(os.path.join('F:/jodiac/agent_output/sessions', sid),
+                      ignore_errors=True)
+
+# 12e. Category filter: tag kill-list beats misleading names (no AI needed)
+try:
+    from agents.category_filter import filter_by_category
+    biz = [
+        {'name': 'Calcutta Medical College & Hospital', 'category': 'hospital'},
+        {'name': 'Kolkata University Post Office', 'category': 'post_office'},
+        {'name': 'Cyber Internet Cafe', 'category': 'computer'},
+        {'name': 'Dell Exclusive Store', 'category': 'computer'},
+        {'name': 'Loreto Convent', 'category': 'school'},
+        {'name': 'NIST Training Institute', 'category': 'training'},
+    ]
+    with mock.patch('agents.ai_engine.is_available', return_value=False):
+        kept, rep = filter_by_category(biz, 'educational centers that teach AutoCAD')
+    names = [b['name'] for b in kept]
+    assert 'Calcutta Medical College & Hospital' not in names, 'hospital passed via name substring'
+    assert 'Kolkata University Post Office' not in names, 'post office passed'
+    assert 'Loreto Convent' in names and 'NIST Training Institute' in names
+    assert 'AI unavailable' in rep, f'report should state strict mode: {rep}'
+    results['filter_killlist'] = f'OK ({len(kept)}/{len(biz)} kept, strict mode)'
+except Exception as e:
+    results['filter_killlist'] = f'FAIL: {e}'
+
+# 12f. Category filter: AI tiered judgment + fail-closed on AI failure
+try:
+    from agents.category_filter import filter_by_category
+    biz = [{'name': f'B{i}', 'category': 'school'} for i in range(1, 8)]
+    verdicts = {'fits': [1, 2, 3], 'plausible': [4], 'unlikely': [5, 6, 7]}
+    with mock.patch('agents.ai_engine.is_available', return_value=True), \
+         mock.patch('agents.ai_engine.generate_json', return_value=verdicts) as gj:
+        kept, rep = filter_by_category(biz, 'engineering colleges')
+    assert [b['name'] for b in kept] == ['B1', 'B2', 'B3', 'B4'], f'keeps should be fits+plausible: {kept}'
+    assert 'AI dropped 3 school' in rep, f'report wrong: {rep}'
+    # Fail-closed: AI errors -> strict tags, never the unfiltered pile
+    with mock.patch('agents.ai_engine.is_available', return_value=True), \
+         mock.patch('agents.ai_engine.generate_json', side_effect=RuntimeError('503')):
+        kept2, rep2 = filter_by_category(biz, 'engineering colleges')
+    assert len(kept2) == 7, 'strict school tags should keep schools'
+    assert 'AI unavailable' in rep2
+    # Malformed AI output (wrong counts) -> fail closed too
+    with mock.patch('agents.ai_engine.is_available', return_value=True), \
+         mock.patch('agents.ai_engine.generate_json', return_value={'fits': [1]}):
+        kept3, rep3 = filter_by_category(biz, 'engineering colleges')
+    assert 'AI unavailable' in rep3, 'malformed verdicts must fail closed'
+    results['filter_ai_tiers'] = 'OK (tiers + fail-closed x2)'
+except Exception as e:
+    results['filter_ai_tiers'] = f'FAIL: {e}'
 
 # 13. Dead handler rejection
 try:

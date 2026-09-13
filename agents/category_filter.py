@@ -1,94 +1,162 @@
-"""Category filter -- filter search results by business category.
+"""Category filter -- judge search results against what the user actually asked for.
 
-Two-stage approach:
-1. Keyword matching (instant, no API) — matches common categories
-2. AI fallback (Gemini) — for complex/ambiguous categories
-
-Extracted from workflows.py to keep search logic separate from workflow orchestration.
+Design (post-mortem of the "hospitals for AutoCAD" failure):
+1. Kill-list first: OSM tags that can NEVER match an intent, regardless of name.
+   ("Calcutta Medical College" is a hospital; the name contains "college".)
+2. AI as the primary reasoner: one Gemini call receives the user's full original
+   phrasing (not a collapsed one-word category) plus every business, and judges
+   fit in tiers: fits / plausible / unlikely.
+3. Fail closed: if AI is unavailable or errors, fall back to a strict
+   tag-based filter -- never return the unfiltered pile.
+4. Every filter run produces a report so the UI can show its work
+   ("dropped 14 hospitals, 9 computer stores") instead of the user auditing it.
 """
 
-# Keyword groups for fast local filtering
-KEYWORD_MAP = {
-    "education": ["school", "college", "university", "training", "coaching",
-                   "institute", "academy", "tutoring", "education", "computer",
-                   "autocad", "engineering", "polytechnic", "it training"],
-    "healthcare": ["hospital", "clinic", "pharmacy", "medical", "nursing",
-                    "dental", "health", "diagnostic", "lab"],
-    "food": ["restaurant", "cafe", "coffee", "hotel", "bar", "bakery",
-             "dining", "eatery", "food", "pizza", "biryani"],
-    "shop": ["shop", "store", "retail", "market", "mall", "boutique",
-             "emporium", "trading"],
-    "office": ["office", "company", "firm", "agency", "consultant",
-               "services", "solutions", "tech", "software"],
-}
+# OSM tags that disqualify a business for education intent no matter what its
+# name says. Substring-matched against the OSM category tag (not the name).
+TAG_KILL_LIST = (
+    "hospital", "blood_bank", "post_office", "pharmacy", "dentist",
+    "clinic", "doctors", "veterinary", "place_of_worship", "police",
+    "fire_station", "bank", "atm", "fuel", "parking", "marketplace",
+    "restaurant", "cafe", "fast_food", "bar", "pub", "bakery",
+)
+
+# Tags accepted when running strict (fail-closed) mode for an education intent.
+STRICT_EDUCATION_TAGS = (
+    "school", "college", "university", "training", "institute",
+    "educational_institution", "kindergarten", "language_school",
+    "music_school", "prep_school", "research_institute",
+)
 
 
-def filter_by_category(businesses: list[dict], category: str) -> list[dict]:
-    """Filter businesses to match a category description.
+def filter_by_category(businesses: list[dict], category: str) -> tuple[list[dict], str]:
+    """Filter businesses to match the user's stated intent.
 
     Args:
         businesses: List of business dicts with 'name' and 'category' keys.
-        category: User's category description (e.g., "educational hubs").
+        category: The user's own phrasing, e.g.
+            "educational centers that teach autocad and will be suitable customers".
 
     Returns:
-        Filtered list of businesses matching the category.
+        (kept_businesses, report) where report is a human-readable one-liner
+        explaining what was kept and dropped.
     """
     if not category:
-        return businesses
+        return businesses, "No category filter applied."
 
-    cat = category.lower().strip()
+    # Stage 1: tag kill-list -- never argue with these.
+    kept, dropped = [], {}
+    for b in businesses:
+        tag = (b.get("category") or "").lower()
+        killer = next((t for t in TAG_KILL_LIST if t in tag), None)
+        if killer:
+            dropped[killer] = dropped.get(killer, 0) + 1
+        else:
+            kept.append(b)
 
-    # Stage 1: Keyword matching (no API call)
-    result = _keyword_filter(businesses, cat)
-    if result is not None:
-        return result
+    if not kept:
+        return [], f"Everything dropped by hard tags: {dropped}."
 
-    # Stage 2: AI-powered filter for complex categories
-    return _ai_filter(businesses, category)
+    # Stage 2: AI reasons about fit in tiers over everything that survived.
+    judged = _ai_tier_filter(kept, category)
+    if judged is not None:
+        kept, ai_dropped = judged
+        ai_drops = ", ".join(f"{n} {tag}" for tag, n in _top_drops(ai_dropped)) or "nothing"
+        report = (f"Filtered {len(businesses)} -> {len(kept)} for \"{category}\": "
+                  f"hard tags dropped {sum(dropped.values())} ({_fmt_drops(dropped)}); "
+                  f"AI dropped {ai_drops}.")
+        return kept, report
 
-
-def _keyword_filter(businesses: list[dict], category: str) -> list[dict] | None:
-    """Fast keyword-based filter. Returns None if no match found (fall through to AI)."""
-    for group, keywords in KEYWORD_MAP.items():
-        if any(k in category for k in [group] + keywords):
-            filtered = []
-            for b in businesses:
-                name_lower = (b.get("name", "") + " " + b.get("category", "")).lower()
-                if any(k in name_lower for k in keywords):
-                    filtered.append(b)
-            return filtered if filtered else None
-    return None
+    # Stage 3: fail closed -- AI unavailable/error means strict tags, not garbage.
+    strict = [b for b in kept if _is_strict_tag_match(b, category)]
+    report = (f"Filtered {len(businesses)} -> {len(strict)} by strict tags "
+              f"(AI unavailable): hard tags dropped {sum(dropped.values())} ({_fmt_drops(dropped)}).")
+    return strict, report
 
 
-def _ai_filter(businesses: list[dict], category: str) -> list[dict]:
-    """AI-powered filter using Gemini. Falls back to returning all businesses."""
+def _ai_tier_filter(businesses: list[dict], category: str) -> tuple[list[dict], dict] | None:
+    """Ask Gemini to judge fit in tiers. Returns (kept, dropped_counts) or None on failure.
+
+    Chunked past 50 businesses so nothing is silently unread. Any failure
+    returns None so the caller fails closed to strict tags.
+    """
     try:
         from agents import ai_engine
         if not ai_engine.is_available():
-            return businesses
+            return None
 
-        biz_list = "\n".join([
-            f"{i+1}. {b.get('name', '?')} ({b.get('category', '?')})"
-            for i, b in enumerate(businesses[:50])
-        ])
+        kept: list[dict] = []
+        dropped: dict[str, int] = {}
+        CHUNK = 50
+        for i in range(0, len(businesses), CHUNK):
+            chunk = businesses[i:i + CHUNK]
+            biz_list = "\n".join(
+                f"{j+1}. {b.get('name', '?')} [{b.get('category', '?')}]"
+                for j, b in enumerate(chunk)
+            )
+            result = ai_engine.generate_json(
+                prompt=f"""The user is looking for: "{category}"
 
-        result = ai_engine.generate_json(
-            prompt=f"""The user is searching for: "{category}"
+For each business below, judge whether it fits what the user is looking for.
+Use the tag in [brackets] as the ground truth for what it IS, not just the name
+(names can be misleading: "Calcutta Medical College" is a hospital).
 
-Here are the businesses found in the area:
 {biz_list}
 
-Return a JSON list of business numbers (1-indexed) that match what the user is looking for.
-Only include businesses that clearly fit the category.
-Example: {{"matching": [1, 3, 5]}}""",
-            system="You are a business classifier. Be precise about which businesses match the user's search intent.",
-        )
+Rubric -- judge by these rules, not impressions:
+- "fits": the business's core activity serves the user's intent directly (e.g. for AutoCAD: an institute or college where CAD/engineering/design is taught or practiced as a core activity).
+- "plausible": a genuine education institution in a related field that could have a use for the product/service, even if the intent field is not its core activity.
+- "unlikely": its core activity cannot serve the intent (hospitals, cafes, shops, hostels, post offices...).
+If the tag is missing or meaningless (e.g. "yes", "other"), judge by the name; if the name also gives no evidence of serving the intent, mark it "unlikely".
+Every business must appear in exactly one list. Be consistent: apply the rubric uniformly to every business.
 
-        if result and "matching" in result:
-            indices = result["matching"]
-            return [businesses[i-1] for i in indices if 0 < i <= len(businesses)]
+Return JSON: {{"fits": [numbers], "plausible": [numbers], "unlikely": [numbers]}}""",
+                system="You are a precise business classifier. Judge fit against the user's actual intent, not name keywords. Apply the rubric uniformly and deterministically.",
+                temperature=0.1,
+            )
+            if not result:
+                return None
+
+            def collect(key: str) -> list[int]:
+                vals = result.get(key, [])
+                return [v for v in vals if isinstance(v, int)] if isinstance(vals, list) else []
+
+            fits = collect("fits")
+            plausible = collect("plausible")
+            unlikely = collect("unlikely")
+
+            total = len(fits) + len(plausible) + len(unlikely)
+            if total != len(chunk):
+                # AI skipped or duplicated businesses -- reject the chunk, fail closed.
+                return None
+
+            for idx in fits + plausible:
+                kept.append(chunk[idx - 1])
+            for idx in unlikely:
+                tag = (chunk[idx - 1].get("category") or "unknown").lower()
+                dropped[tag] = dropped.get(tag, 0) + 1
+
+        return kept, dropped
 
     except Exception:
-        pass
+        return None
 
-    return businesses
+
+def _is_strict_tag_match(b: dict, category: str) -> bool:
+    """Strict tag check for fail-closed mode. Education intent -> education tags only."""
+    tag = (b.get("category") or "").lower()
+    cat = category.lower()
+    if any(w in cat for w in ("school", "college", "education", "training", "academy",
+                              "institute", "autocad", "cad", "engineering", "learn")):
+        return any(t in tag for t in STRICT_EDUCATION_TAGS)
+    # Non-education intents: fall back to name/category word overlap.
+    words = [w for w in cat.replace(",", " ").split() if len(w) > 3]
+    return any(w in tag or w in (b.get("name") or "").lower() for w in words)
+
+
+def _top_drops(dropped: dict[str, int]) -> list[tuple[str, int]]:
+    return sorted(dropped.items(), key=lambda kv: -kv[1])[:5]
+
+
+def _fmt_drops(dropped: dict[str, int]) -> str:
+    return ", ".join(f"{n} {tag}" for tag, n in _top_drops(dropped))

@@ -77,7 +77,7 @@ _TOOLS = [
                         },
                         "category": {
                             "type": "string",
-                            "description": "Business type filter (e.g. 'school', 'restaurant', 'pharmacy', 'cafe'). Empty means all types.",
+                            "description": "What the user is looking for, in the user's OWN words, including qualifiers (e.g. 'educational centers that teach AutoCAD', 'schools', 'pharmacies near hospitals'). Do NOT collapse this to one word -- the filter reasons over the full phrase.",
                         },
                         "radius": {
                             "type": "integer",
@@ -487,7 +487,7 @@ def _build_search_response(args: dict) -> str:
     location = args.get("location", "that area")
     category = args.get("category", "")
     if category:
-        return f"Searching for {category}s in {location}..."
+        return f"Searching for: {category} in {location}..."
     return f"Searching for businesses in {location}..."
 
 

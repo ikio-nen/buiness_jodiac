@@ -92,6 +92,9 @@ def _handle_search(params: dict, session, sender: str) -> dict:
                 "data": report, "live_events": []}
 
     message = f"Found {total} businesses, {len(no_site)} without website"
+    filter_report = report.get("search", {}).get("filter_report", "")
+    if filter_report:
+        message += f"\n  [filter] {filter_report}"
     phones_csv = report.get("phones_csv", "")
     enrich = report.get("enrich", {})
     if enrich.get("method") == "maps_fallback":

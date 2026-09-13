@@ -180,6 +180,8 @@ def run_step_search(session):
     else:
         from agents.ui import show_search_results
         status_badge("complete", f"Found {len(result['businesses'])} businesses, {len(result['no_site'])} without website")
+        if result.get("filter_report"):
+            p(f"  [filter] {result['filter_report']}", C.DIM)
         show_search_results(result["no_site"], result["with_site"])
         session.save_data({"location": location, "radius": radius,
                           "businesses": result["businesses"],
