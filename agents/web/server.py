@@ -144,7 +144,7 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         from agents.config import get_business_profile
         from agents.chat_memory import get_memory
-        from agents.chatbot import parse_intent, ActionType, HELP_TEXT
+        from agents.chatbot import parse_intents, ActionType, HELP_TEXT
 
         profile = get_business_profile()
         memory = get_memory(session_id=session.id if session.active else "")
@@ -246,13 +246,16 @@ async def websocket_endpoint(websocket: WebSocket):
             profile = get_business_profile()
             session_state = session.get_session_state() if session.active else ""
 
-            # Parse intent with session state
-            action = parse_intent(user_msg, context=context, business_profile=profile,
-                                 session_state=session_state)
-            at = action.type.value
+            # Parse intent with session state. Multi-part messages return a
+            # list of actions that run in order (e.g. "find emails for them
+            # and draft an email for each" -> ENRICH then DRAFT).
+            actions = parse_intents(user_msg, context=context, business_profile=profile,
+                                    session_state=session_state)
+            action = actions[0] if actions else None
+            at = action.type.value if action else "unknown"
 
             # ── Lightweight intents handled inline ───────────────────
-            if action.type == ActionType.GREETING:
+            if action and action.type == ActionType.GREETING:
                 content = action.response
                 await websocket.send_json({
                     "type": "jarvis", "content": content,
@@ -262,18 +265,18 @@ async def websocket_endpoint(websocket: WebSocket):
                                    action={"type": at, "params": action.params})
                 continue
 
-            if action.type == ActionType.HELP:
+            if action and action.type == ActionType.HELP:
                 await websocket.send_json({"type": "jarvis", "content": HELP_TEXT})
                 continue
 
-            if action.type == ActionType.UNKNOWN:
+            if action and action.type == ActionType.UNKNOWN:
                 content = action.response or "I'm not sure what you mean."
                 await websocket.send_json({"type": "jarvis", "content": content})
                 memory.add_message("jarvis", content,
                                    action={"type": at, "params": action.params})
                 continue
 
-            if action.type == ActionType.BRAINSTORM:
+            if action and action.type == ActionType.BRAINSTORM:
                 from agents.brainstorm import BrainstormSession
                 bs = BrainstormSession()
                 _brainstorm_sessions[ws_id] = bs
@@ -288,11 +291,11 @@ async def websocket_endpoint(websocket: WebSocket):
                                    action={"type": at, "params": action.params})
                 continue
 
-            if action.type == ActionType.REVIEW:
+            if action and action.type == ActionType.REVIEW:
                 await _start_review(websocket, memory, ws_id)
                 continue
 
-            if action.type == ActionType.LIST_SESSIONS:
+            if action and action.type == ActionType.LIST_SESSIONS:
                 from agents.session import list_sessions
                 sessions = list_sessions()
                 if sessions:
@@ -312,7 +315,10 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
 
             # ── Everything else runs through action_dispatch ─────────
-            await _run_dispatched(action, websocket, session, memory)
+            # Chained actions run in order; each pushes its own ack,
+            # progress, and result messages to the browser.
+            for chained in actions:
+                await _run_dispatched(chained, websocket, session, memory)
 
     except WebSocketDisconnect:
         pass

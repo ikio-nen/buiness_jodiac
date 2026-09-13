@@ -6,7 +6,7 @@ from agents.ui import (
     C, p, success, error, info, warn, clear, banner,
     typing_print, spinner, prompt, prompt_yes_no, show_sessions,
 )
-from agents.chatbot import parse_intent, ActionType, HELP_TEXT
+from agents.chatbot import parse_intents, ActionType, HELP_TEXT
 from agents.action_dispatch import dispatch
 from agents.chat_memory import get_memory
 from agents.brain import get_brain
@@ -57,29 +57,34 @@ def run_chat_mode(session):
         profile = get_business_profile()
         session_state = session.get_session_state() if session.active else ""
 
-        # Parse intent
-        action = parse_intent(user_input, context=context, business_profile=profile,
-                             session_state=session_state)
+        # Parse intent -- multi-part messages return a list of actions that
+        # run in order (e.g. "find emails for them and draft emails" ->
+        # ENRICH then DRAFT).
+        actions = parse_intents(user_input, context=context, business_profile=profile,
+                                session_state=session_state)
 
-        # Save JARVIS response to memory
-        if action.response:
-            memory.add_message("jarvis", action.response,
-                             action={"type": action.type.value, "params": action.params})
+        # Save JARVIS responses to memory
+        for action in actions:
+            if action.response:
+                memory.add_message("jarvis", action.response,
+                                 action={"type": action.type.value, "params": action.params})
 
-        if action.type == ActionType.HELP:
+        first = actions[0] if actions else None
+
+        if first and first.type == ActionType.HELP:
             print(HELP_TEXT)
             continue
 
-        if action.type == ActionType.GREETING:
-            typing_print(f"JARVIS: {action.response}", C.RED, delay=0.03)
+        if first and first.type == ActionType.GREETING:
+            typing_print(f"JARVIS: {first.response}", C.RED, delay=0.03)
             print()
             continue
 
-        if action.type == ActionType.BRAINSTORM:
+        if first and first.type == ActionType.BRAINSTORM:
             _run_brainstorm(session)
             continue
 
-        if action.type == ActionType.LIST_SESSIONS:
+        if first and first.type == ActionType.LIST_SESSIONS:
             from agents.session import list_sessions
             sessions = list_sessions()
             if sessions:
@@ -88,11 +93,11 @@ def run_chat_mode(session):
                 info("No sessions yet.")
             continue
 
-        if action.type == ActionType.REVIEW:
+        if first and first.type == ActionType.REVIEW:
             _run_cli_review(session)
             continue
 
-        if action.type == ActionType.CHECKIN:
+        if first and first.type == ActionType.CHECKIN:
             from agents.proactive import check_in, format_briefing
             briefing = format_briefing(check_in())
             typing_print(f"JARVIS: {briefing}", C.CYAN, delay=0.02)
@@ -100,46 +105,48 @@ def run_chat_mode(session):
             print()
             continue
 
-        if action.type == ActionType.UNKNOWN:
-            warn(action.response)
+        if first and first.type == ActionType.UNKNOWN:
+            warn(first.response)
             continue
 
         # Show thinking indicator
         thinking_msgs = ["Analyzing your request", "Processing", "Thinking", "Working on it"]
         spinner(f"{_rand.choice(thinking_msgs)}...", 0.5)
 
-        if action.response:
-            typing_print(f"JARVIS: {action.response}", C.RED, delay=0.03)
-            print()
+        # Execute each action via action_dispatch, in order
+        for action in actions:
+            if action.response:
+                typing_print(f"JARVIS: {action.response}", C.RED, delay=0.03)
+                print()
 
-        # Execute via action_dispatch
-        try:
-            result = dispatch(action.type, action.params, session)
+            try:
+                result = dispatch(action.type, action.params, session)
 
-            if result.get("message"):
-                if result["success"]:
-                    success(result["message"])
-                else:
-                    warn(result["message"])
+                if result.get("message"):
+                    if result["success"]:
+                        success(result["message"])
+                    else:
+                        warn(result["message"])
 
-            # Special handling for search (needs live updates + user interaction)
-            if action.type == ActionType.SEARCH and result["success"]:
-                data = result.get("data", {})
-                businesses = data.get("businesses", [])
-                if businesses:
-                    p(f"\n  Found {len(businesses)} businesses without websites.", C.GREEN)
-                    p("  Say 'draft emails' to continue, or pick specific ones.", C.DIM)
+                # Special handling for search (needs live updates + user interaction)
+                if action.type == ActionType.SEARCH and result["success"]:
+                    data = result.get("data", {})
+                    businesses = data.get("businesses", [])
+                    if businesses:
+                        p(f"\n  Found {len(businesses)} businesses without websites.", C.GREEN)
+                        p("  Say 'draft emails' to continue, or pick specific ones.", C.DIM)
 
-            # Special handling for draft (needs user interaction)
-            elif action.type == ActionType.DRAFT and result["success"]:
-                p("  Say 'send all' to send, or 'review emails' to edit.", C.DIM)
+                # Special handling for draft (needs user interaction)
+                elif action.type == ActionType.DRAFT and result["success"]:
+                    p("  Say 'send all' to send, or 'review emails' to edit.", C.DIM)
 
-            # Special handling for send (confirmation)
-            elif action.type == ActionType.SEND:
-                pass  # result message already shown
+                # Special handling for send (confirmation)
+                elif action.type == ActionType.SEND:
+                    pass  # result message already shown
 
-        except Exception as e:
-            error(f"Error: {type(e).__name__}: {e}")
+            except Exception as e:
+                error(f"Error: {type(e).__name__}: {e}")
+                break  # a failed step aborts the rest of the chain
 
         print()
 

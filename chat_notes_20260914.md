@@ -97,9 +97,12 @@ Total: 14 found — 8 without site, 6 with site.
 
 - Draft step: DONE at 01:33 (8 drafts). Sending blocked on missing email
   addresses — needs a contact source (Hunter/domain search or manual lookup).
-- Root-cause fix (code): Gemini parser should chain enrich→draft from one
-  message instead of silently dropping the second half.
+- Root-cause fix (code): DONE at 04:05 — parser now chains multi-part
+  messages (enrich→draft runs both steps from one message), verified live
+  with the original failing message; contact-finder also hunts college
+  domains for emails (Duff Building → hailey@duff.com).
 - Overdue follow-up: Bandel St. John's High School (11 days) — flagged by agent check-in.
 - 5 new prospects not yet reviewed by agent team ('team act').
-- No emails/phones found for any of the 8 no-site prospects via Google — WhatsApp
-  messaging needs a different contact source.
+- Contact finder misses most Kolkata colleges (name-based domain probing
+  can't guess caluniv.ac.in-style domains) — 7/8 drafts still have no `to:`;
+  needs a better site-discovery step or manual lookup.

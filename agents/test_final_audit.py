@@ -292,6 +292,40 @@ try:
 except Exception as e:
     results['classification'] = f'FAIL: {e}'
 
+# 15. Parser multi-action chaining (the "enrich and draft" truncation bug)
+try:
+    from agents.chatbot import parse_intents, parse_intent, ActionType, Action
+
+    # Deterministic supplement: enrich -> draft chaining without any AI call.
+    acts = parse_intents('x', context=None)
+    # (unknown input path covered by fallback; now test the supplement core)
+    from agents.chatbot import _requested_steps, _make_chain_action, _NEXT_STEP
+
+    steps = _requested_steps("find emails for them and draft an email for each")
+    assert ActionType.ENRICH in steps, f"enrich keyword missed: {steps}"
+    assert ActionType.DRAFT in steps, f"draft keyword missed: {steps}"
+
+    # Simulate Gemini having emitted only enrich: supplement appends draft.
+    seen = {ActionType.ENRICH}
+    collected = [Action(type=ActionType.ENRICH, response="Looking up...")]
+    nxt = _NEXT_STEP.get(ActionType.ENRICH)
+    assert nxt == ActionType.DRAFT
+    assert nxt in steps and nxt not in seen
+    chained = _make_chain_action(nxt)
+    assert chained and chained.type == ActionType.DRAFT
+    assert chained.params.get("selection") == "all"
+
+    # SEND must never be auto-chained.
+    assert _make_chain_action(ActionType.SEND) is None
+    assert ActionType.SEND not in steps
+
+    # Back-compat: single-action wrapper returns an Action, not a list.
+    one = parse_intent("hello")
+    assert hasattr(one, "type"), "parse_intent must return a single Action"
+    results['parser_chaining'] = 'OK'
+except Exception as e:
+    results['parser_chaining'] = f'FAIL: {e}'
+
 # Summary
 print('\n=== FINAL AUDIT ===')
 for k, v in results.items():

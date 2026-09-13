@@ -5,6 +5,7 @@ No more brittle regex matching. Gemini has full session context.
 """
 import json
 import random as _random
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -37,6 +38,23 @@ class Action:
     type: ActionType
     params: dict = field(default_factory=dict)
     response: str = ""  # What JARVIS says back
+
+
+# Logical next step per action -- used to chain multi-part requests.
+# If Gemini returns only the first function call for a message like
+# "find emails for them and draft emails", the missing follow-up steps
+# that the user explicitly asked for are appended from this map.
+_NEXT_STEP = {
+    ActionType.SEARCH: ActionType.DRAFT,
+    ActionType.ENRICH: ActionType.DRAFT,
+    ActionType.RESEARCH: ActionType.DRAFT,
+}
+
+# Actions the chain-supplement is allowed to append. SEND is deliberately
+# excluded -- outbound email must stay behind an explicit user action
+# (and behind the review/approval gate in action_dispatch).
+_CHAINABLE = {ActionType.DRAFT, ActionType.ENRICH, ActionType.RESEARCH,
+              ActionType.SCRAPE, ActionType.SYNC}
 
 
 # ── Quick greeting check (no API call needed) ──────────────────────
@@ -233,9 +251,12 @@ _TOOLS = [
 ]
 
 
-def parse_intent(user_input: str, context: list[dict] = None,
-                 business_profile: dict = None, session_state: str = "") -> Action:
-    """Parse user input using Gemini with function calling.
+def parse_intents(user_input: str, context: list[dict] = None,
+                  business_profile: dict = None, session_state: str = "") -> list[Action]:
+    """Parse user input into an ordered list of Actions.
+
+    Multi-part messages ("find emails for them and draft emails") return
+    every requested step; single-part messages return a one-item list.
 
     Args:
         user_input: What the user typed
@@ -245,9 +266,18 @@ def parse_intent(user_input: str, context: list[dict] = None,
     """
     text = user_input.strip()
     if not text:
-        return Action(type=ActionType.UNKNOWN, response="Type something and I'll help!")
+        return [Action(type=ActionType.UNKNOWN, response="Type something and I'll help!")]
 
     lower = text.lower().strip()
+
+    actions = []
+    seen_types: set[ActionType] = set()
+
+    def emit(action: Action) -> None:
+        if action.type in seen_types:
+            return  # "draft and then draft again" collapses to one step
+        seen_types.add(action.type)
+        actions.append(action)
 
     # Quick brainstorm check (no API call)
     BRAINSTORM_TRIGGERS = (
@@ -257,11 +287,11 @@ def parse_intent(user_input: str, context: list[dict] = None,
         "new project", "business profile", "my product", "my business",
     )
     if any(w in lower for w in BRAINSTORM_TRIGGERS):
-        return Action(type=ActionType.BRAINSTORM, response="Let's set up your business profile!")
+        return [Action(type=ActionType.BRAINSTORM, response="Let's set up your business profile!")]
 
     # Quick help check (no API call)
     if lower in ("help", "commands", "options", "?", "what can you do"):
-        return Action(type=ActionType.HELP, response="")
+        return [Action(type=ActionType.HELP, response="")]
 
     # Quick check-in triggers (no API call)
     CHECKIN_TRIGGERS = (
@@ -270,24 +300,24 @@ def parse_intent(user_input: str, context: list[dict] = None,
         "anything due", "status of follow", "overdue",
     )
     if lower in CHECKIN_TRIGGERS or any(lower.startswith(t) for t in CHECKIN_TRIGGERS):
-        return Action(type=ActionType.CHECKIN, response="Scanning everything I know...")
+        return [Action(type=ActionType.CHECKIN, response="Scanning everything I know...")]
 
     # Quick "talk to a specialist" triggers (no API call)
     for agent_key in ("scout", "strategist", "analyst"):
         if lower.startswith(f"ask {agent_key}"):
             msg = text[len(f"ask {agent_key}"):].strip(" :,-") \
                 or "Introduce yourself and what you can help with."
-            return Action(type=ActionType.ASK_AGENT,
-                          params={"agent": agent_key, "message": msg},
-                          response=f"Looping in {agent_key.capitalize()}...")
+            return [Action(type=ActionType.ASK_AGENT,
+                           params={"agent": agent_key, "message": msg},
+                           response=f"Looping in {agent_key.capitalize()}...")]
 
     # Quick team-act triggers (no API call)
     TEAM_TRIGGERS = ("team act", "teamact", "put the team on it",
                      "team get to work", "have the team research",
                      "put the team to work")
     if lower in TEAM_TRIGGERS or any(lower.startswith(t) for t in TEAM_TRIGGERS):
-        return Action(type=ActionType.TEAM_ACT,
-                      response="Putting the team on the current prospects...")
+        return [Action(type=ActionType.TEAM_ACT,
+                       response="Putting the team on the current prospects...")]
 
     # Quick greeting check (no API call)
     if lower in _GREETING_WORDS or any(lower.startswith(g) for g in _GREETING_WORDS):
@@ -297,23 +327,41 @@ def parse_intent(user_input: str, context: list[dict] = None,
             resp += f"\n\n  Current mission: Selling {profile['product']}"
         else:
             resp += "\n\n  No business profile set. Press [S] to tell me what you sell."
-        return Action(type=ActionType.GREETING, response=resp)
+        return [Action(type=ActionType.GREETING, response=resp)]
 
     # Try Gemini for intelligent parsing
-    return _parse_with_gemini(text, context, business_profile, session_state)
+    return _parse_with_gemini(text, context, business_profile, session_state,
+                              actions, seen_types)
 
 
 def _parse_with_gemini(user_input: str, context: list[dict] = None,
-                       business_profile: dict = None, session_state: str = "") -> Action:
-    """Use Gemini with function calling to parse intent."""
+                       business_profile: dict = None, session_state: str = "",
+                       actions: list[Action] = None,
+                       seen_types: set = None) -> list[Action]:
+    """Use Gemini with function calling to parse intent into actions.
+
+    Every function-call part in the model's response becomes an Action, so a
+    multi-part request returns its steps in order. On top of that, a
+    deterministic chain supplement fills in follow-up steps the user asked
+    for but the model didn't emit (the original one-action truncation bug).
+    """
+    collect = actions if actions is not None else []
+    seen = seen_types if seen_types is not None else set()
+
+    def emit(action: Action) -> None:
+        if action.type in seen:
+            return  # duplicate step ("draft ... and draft again") collapses
+        seen.add(action.type)
+        collect.append(action)
+
     try:
         from agents import ai_engine
         if not ai_engine.is_available():
-            return Action(
+            return [Action(
                 type=ActionType.UNKNOWN,
                 response="AI is not configured. Set your Gemini API key in Setup [S]. "
                         "Meanwhile, try: 'find businesses in London', 'draft emails', or 'show status'."
-            )
+            )]
 
         # Build context-aware system prompt
         system = _build_system_prompt(business_profile, session_state)
@@ -333,10 +381,10 @@ def _parse_with_gemini(user_input: str, context: list[dict] = None,
 
         client = _get_client()
         if not client:
-            return Action(
+            return [Action(
                 type=ActionType.UNKNOWN,
                 response="AI client not available. Check your Gemini API key."
-            )
+            )]
 
         from agents.config import get_ai_model
         model = get_ai_model()
@@ -351,24 +399,93 @@ def _parse_with_gemini(user_input: str, context: list[dict] = None,
             ),
         )
 
-        # Parse function call response
+        # Parse function call response -- ALL parts, not just the first.
         if response.candidates and response.candidates[0].content:
-            part = response.candidates[0].content.parts[0]
-            if hasattr(part, "function_call") and part.function_call:
-                return _handle_function_call(part.function_call, user_input)
+            emitted_fc = False
+            for part in (response.candidates[0].content.parts or []):
+                if hasattr(part, "function_call") and part.function_call:
+                    emitted_fc = True
+                    emit(_handle_function_call(part.function_call, user_input))
+
+            if emitted_fc:
+                # Chain supplement: if the user asked for a step that Gemini
+                # didn't emit, append its logical follow-up. Only steps the
+                # user explicitly named are supplemented -- and only safe
+                # (non-SEND) actions.
+                requested = _requested_steps(user_input)
+                for act in list(collect):
+                    current = act.type
+                    while True:
+                        nxt = _NEXT_STEP.get(current)
+                        if (not nxt or nxt not in requested or nxt in seen
+                                or nxt not in _CHAINABLE):
+                            break
+                        nxt_action = _make_chain_action(nxt, user_input)
+                        if not nxt_action:
+                            break
+                        emit(nxt_action)
+                        current = nxt
+                return collect
 
             # Text response (clarification or chat)
-            if hasattr(part, "text") and part.text:
-                return Action(type=ActionType.UNKNOWN, response=part.text)
+            part = response.candidates[0].content.parts[0] if response.candidates[0].content.parts else None
+            if part is not None and hasattr(part, "text") and part.text:
+                return [Action(type=ActionType.UNKNOWN, response=part.text)]
 
     except Exception as e:
         print(f"  [AI] Intent parsing error: {e}")
 
-    return Action(
+    return [Action(
         type=ActionType.UNKNOWN,
         response="I'm not sure what you mean. Try: 'find businesses in London', "
                 "'draft emails', or 'show status'."
-    )
+    )]
+
+
+# Keywords in the user's message that name an explicit follow-up step.
+_STEP_KEYWORDS = {
+    ActionType.SEARCH: ("find ", "search ", "search for", "look for", "locate "),
+    ActionType.ENRICH: ("find email", "emails for", "lookup email", "look up email",
+                        "get email", "enrich", "hunt email", "find contact",
+                        "email addresses", "phone", "contact info"),
+    ActionType.RESEARCH: ("research", "reviews", "what do their google"),
+    ActionType.DRAFT: ("draft", "write email", "write personalized", "prepare email",
+                       "compose email", "write outreach", "prepare professional"),
+}
+
+
+def _requested_steps(user_input: str) -> set:
+    """Which follow-up steps does the user explicitly name in this message?"""
+    low = user_input.lower()
+    out = set()
+    for act_type, keywords in _STEP_KEYWORDS.items():
+        if any(k in low for k in keywords):
+            out.add(act_type)
+    return out
+
+
+_TOP_N_RE = re.compile(r"top\s+(\d+)", re.I)
+
+
+def _make_chain_action(act_type: ActionType, user_input: str = "") -> Action:
+    """Build the default-param Action for a chained follow-up step.
+
+    A chained draft honors 'top N' if the user named one in the message.
+    """
+    draft_params = {"selection": "all"}
+    if act_type == ActionType.DRAFT:
+        m = _TOP_N_RE.search(user_input or "")
+        if m:
+            draft_params = {"selection": f"top{m.group(1)}"}
+    defaults = {
+        ActionType.DRAFT: ("Drafting personalized emails...", draft_params),
+        ActionType.ENRICH: ("Looking up email addresses...", {}),
+        ActionType.RESEARCH: ("Researching businesses with AI...", {}),
+    }
+    if act_type not in defaults:
+        return None
+    response, params = defaults[act_type]
+    return Action(type=act_type, params=dict(params), response=response)
 
 
 def _build_system_prompt(business_profile: dict = None,
@@ -390,7 +507,12 @@ def _build_system_prompt(business_profile: dict = None,
         "",
         "Rules:",
         "- Always use a function call unless the user is just chatting.",
-        "- For complex requests like 'find schools and draft emails', use search_businesses first.",
+        "- If the user asks for MORE THAN ONE thing in one message (e.g. 'find "
+        "emails for them and draft an email for each'), call EVERY tool the "
+        "message names, in the order the user listed them: enrich_emails, "
+        "then draft_emails. Do not stop after the first tool.",
+        "- For complex requests like 'find schools and draft emails', use "
+        "search_businesses first, then draft_emails in the same response.",
         "- If the user mentions a location, extract it for search_businesses.",
         "- If the user says 'draft' or 'write emails', use draft_emails.",
         "- If the user says 'send', use send_emails.",
@@ -494,6 +616,21 @@ def _build_search_response(args: dict) -> str:
 def _ask_user_action(args: dict) -> Action:
     question = args.get("question", "Could you provide more details?")
     return Action(type=ActionType.UNKNOWN, response=question)
+
+
+def parse_intent(user_input: str, context: list[dict] = None,
+                 business_profile: dict = None, session_state: str = "") -> Action:
+    """Back-compat single-action wrapper: first action of parse_intents().
+
+    Single-part messages behave exactly as before. Multi-part messages are
+    truncated to the first action here -- use parse_intents() to get all of
+    them.
+    """
+    actions = parse_intents(user_input, context=context,
+                            business_profile=business_profile,
+                            session_state=session_state)
+    return actions[0] if actions else Action(type=ActionType.UNKNOWN,
+                                             response="I'm not sure what you mean.")
 
 
 # ── Help text ────────────────────────────────────────────────────────
