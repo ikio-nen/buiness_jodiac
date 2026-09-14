@@ -55,9 +55,10 @@ def search_businesses(lat: float, lon: float, radius: int = 2000,
     for attempt in range(3):
         result = subprocess.run(
             ["curl", "-s", "-X", "POST", OVERPASS_URL,
+             "-H", "User-Agent: JARVIS-Outreach/1.0 (business contact finder)",
              "-d", f"data={encoded_data}"],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            encoding="utf-8", errors="replace", timeout=30,
+            encoding="utf-8", errors="replace", timeout=60,
         )
         if result.returncode == 0 and result.stdout.strip():
             try:
