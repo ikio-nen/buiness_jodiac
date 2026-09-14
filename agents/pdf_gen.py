@@ -5,10 +5,15 @@ from fpdf import FPDF
 from .config import PDF_DIR
 
 
+def _latin1(text: str) -> str:
+    """Make any text safe for fpdf's core Helvetica font (latin-1 only)."""
+    return (text or "").encode("latin-1", "replace").decode("latin-1")
+
+
 def generate_proposal_pdf(business: dict, sender_name: str = "The Team") -> str:
     """Generate a professional PDF proposal for a business. Returns file path."""
-    name = business.get("name", "Business")
-    address = business.get("address", "")
+    name = _latin1(business.get("name", "Business"))
+    address = _latin1(business.get("address", ""))
 
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=25)
@@ -116,7 +121,7 @@ def generate_proposal_pdf(business: dict, sender_name: str = "The Team") -> str:
     pdf.multi_cell(0, 7, "Let's build something great together!\n", align="C")
 
     # ── Save ──
-    slug = name.replace(" ", "_").replace("'", "").lower()
+    slug = "".join(c if c.isalnum() else "_" for c in name.lower())
     filename = f"proposal_{slug}.pdf"
     output_path = PDF_DIR / filename
     pdf.output(str(output_path))

@@ -46,12 +46,24 @@ class ChatMemory:
 
     def __init__(self, conversation_id: Optional[int] = None,
                  session_id: str = ""):
-        self.conn = _get_conn()
+        self.conn: Optional[sqlite3.Connection] = None
         self.session_id = session_id
+        self._ensure()
         if conversation_id:
             self.conversation_id = conversation_id
         else:
             self.conversation_id = self._create_conversation(session_id)
+
+    def _ensure(self):
+        """Re-open the connection if it was closed (e.g. close_memory() ran
+        while a live handler still held this instance)."""
+        if self.conn is not None:
+            try:
+                self.conn.execute("SELECT 1")
+                return
+            except sqlite3.ProgrammingError:
+                pass
+        self.conn = _get_conn()
 
     def _create_conversation(self, session_id: str = "") -> int:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -63,6 +75,7 @@ class ChatMemory:
         return cur.lastrowid
 
     def set_title(self, title: str):
+        self._ensure()
         self.conn.execute(
             "UPDATE conversations SET title = ? WHERE id = ?",
             (title, self.conversation_id),
@@ -70,6 +83,7 @@ class ChatMemory:
         self.conn.commit()
 
     def add_message(self, role: str, content: str, action: dict = None):
+        self._ensure()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         action_json = json.dumps(action, ensure_ascii=True) if action else ""
         self.conn.execute(
@@ -94,6 +108,7 @@ class ChatMemory:
 
     def get_context(self, n: int = 10) -> list[dict]:
         """Return last N messages for Gemini context."""
+        self._ensure()
         rows = self.conn.execute(
             "SELECT role, content, action_json, timestamp FROM messages "
             "WHERE conversation_id = ? ORDER BY id DESC LIMIT ?",
@@ -109,6 +124,7 @@ class ChatMemory:
 
     def search(self, query: str, limit: int = 20) -> list[dict]:
         """Search across all conversations."""
+        self._ensure()
         rows = self.conn.execute(
             "SELECT m.role, m.content, m.timestamp, c.title, c.id as conv_id "
             "FROM messages m JOIN conversations c ON m.conversation_id = c.id "
@@ -127,6 +143,7 @@ class ChatMemory:
         ]
 
     def get_recent_conversations(self, limit: int = 10) -> list[dict]:
+        self._ensure()
         rows = self.conn.execute(
             "SELECT c.id, c.title, c.started_at, c.session_id, "
             "(SELECT COUNT(*) FROM messages WHERE conversation_id = c.id) as msg_count "
@@ -145,7 +162,9 @@ class ChatMemory:
         ]
 
     def close(self):
-        self.conn.close()
+        if self.conn is not None:
+            self.conn.close()
+            self.conn = None
 
 
 # ── Module-level convenience ─────────────────────────────────────────

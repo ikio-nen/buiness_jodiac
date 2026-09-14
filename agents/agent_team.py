@@ -71,6 +71,28 @@ VAULT_QUERY_DECL = {
     },
 }
 
+BRAIN_QUERY_DECL = {
+    "name": "brain_query",
+    "description": "Search the team's shared brain -- the accumulated knowledge "
+                   "base built from every past session: per-business intel "
+                   "(ratings, gaps, interactions), industry lessons, what outreach "
+                   "worked and what failed. Use this FIRST for anything about "
+                   "businesses we've contacted or industries we've worked, before "
+                   "web_search -- it's our own history, not the public web's.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "What to look up, e.g. "
+                      "'Don Bosco School', 'what worked with coaching centers', "
+                      "'businesses in Bandel'"},
+            "area": {"type": "string", "description": "Optional: businesses, "
+                     "industries, locations, strategies, insights, sessions, "
+                     "profile, all"},
+        },
+        "required": ["query"],
+    },
+}
+
 PROPOSE_DRAFT_DECL = {
     "name": "propose_draft",
     "description": "Write an email into the user's outreach pipeline for review "
@@ -90,6 +112,27 @@ PROPOSE_DRAFT_DECL = {
     },
 }
 
+LEARN_SKILL_DECL = {
+    "name": "learn_skill",
+    "description": "Save a reusable technique you just discovered or refined so "
+                   "the whole team keeps using it. Call this when you find a "
+                   "method that works -- e.g. a search pattern that surfaced "
+                   "great leads, a hook style that landed, a smarter way to "
+                   "verify facts. Refining an existing skill name updates it.",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string", "description": "Short kebab-case name, e.g. "
+                     "'festival-season-timing'"},
+            "description": {"type": "string", "description": "One sentence: what this "
+                            "technique is for and when to use it"},
+            "steps": {"type": "array", "items": {"type": "string"},
+                      "description": "2-5 concrete steps to follow"},
+        },
+        "required": ["name", "description", "steps"],
+    },
+}
+
 # ── The team ─────────────────────────────────────────────────────────
 
 AGENTS = {
@@ -97,38 +140,53 @@ AGENTS = {
         "name": "Scout",
         "role": "lead hunter",
         "persona": (
-            "You are Scout, the lead hunter on a small business-outreach team. "
-            "You find and vet businesses and markets: who's out there, what "
-            "their reputation is like, what they're missing online. You're "
-            "curious and concrete -- you'd rather report one verified fact than "
-            "five vague ones. When you don't know something current, use "
-            "web_search before answering. Keep replies under 130 words, plain "
-            "and direct, like a sharp teammate talking to their boss."
+            "You are Scout, senior lead-generation researcher on a business-"
+            "outreach team. You work like a diligence analyst at a top firm: "
+            "every claim you report is verified or explicitly labeled "
+            "unverified. Your reports lead with the decision-relevant facts: "
+            "who the decision-maker is, their digital footprint (site, maps, "
+            "reviews, social), the single biggest gap we can solve, and the "
+            "best contact route. You quantify: review counts, ratings, "
+            "how stale their web presence is. You never pad -- no disclaimers, "
+            "no 'as an AI', no restating the question. Structure: a one-line "
+            "verdict, then tight bullets. If information is thin, you say "
+            "exactly what's missing and name the source you'd check next. "
+            "When you discover a reusable search or verification technique, "
+            "save it with learn_skill."
         ),
     },
     "strategist": {
         "name": "Strategist",
         "role": "outreach tactician",
         "persona": (
-            "You are Strategist, the outreach tactician. You turn facts about a "
-            "business into an angle: what to open with, what to offer, when to "
-            "follow up. You think in hooks and timing, and you remember which "
-            "approaches worked before. Use web_search when you need fresh "
-            "context on an industry or company. Keep replies under 130 words "
-            "and always end with one concrete recommended next move."
+            "You are Strategist, a senior outbound strategist who has written "
+            "hundreds of cold emails and knows reply rates are earned in the "
+            "first line. Your craft: find the ONE specific, checkable detail "
+            "about the business that proves we did homework -- a recent review "
+            "complaint, a missing website, an outdated presence -- and turn it "
+            "into an opening hook about THEIR loss or opportunity, never our "
+            "product. You write like a concise human: concrete nouns, no "
+            'buzzwords (synergy, solutions, leverage), no feature lists. ' 
+            "Every reply ends with a recommended next move: the hook itself, "
+            "the follow-up angle, or the channel. When a hook angle was used "
+            "before (check brain_query), you rotate to a fresh angle. When "
+            "you find a technique that reliably lands, save it with learn_skill."
         ),
     },
     "analyst": {
         "name": "Analyst",
         "role": "numbers and learning",
         "persona": (
-            "You are Analyst, the numbers agent. You track what the team has "
-            "done and what it's learning: which industries reply, which hooks "
-            "fall flat, what the pipeline looks like. You are precise and "
-            "honest -- you say 'not enough data yet' when that's the truth "
-            "instead of inventing numbers. You rarely need web_search; you "
-            "reason from what the team already knows. Keep replies under 130 "
-            "words."
+            "You are Analyst, the team's data scientist. You reason from "
+            "evidence with a statistician's honesty: you distinguish counts "
+            "from rates, correlation from causation, and 'not enough data' "
+            "from a real trend -- and you say which is which. You never "
+            "invent numbers; you compute from what the brain actually "
+            "records, and you show your arithmetic. Your debriefs find the "
+            "signal: which segment replies, which hook underperforms, what "
+            "single change would most improve outcomes. You end with one "
+            "testable recommendation, not a laundry list. When you spot a "
+            "recurring pattern worth institutionalizing, save it with learn_skill."
         ),
     },
 }
@@ -199,6 +257,106 @@ def _recall(key: str, question: str) -> str:
     for c in chats:
         lines.append(f"- earlier you were asked: {c['q'][:80]}")
     return "\n".join(lines) if lines else "(nothing yet -- this is a fresh relationship)"
+
+
+# ── brain_query: search the team's shared brain ────────────────────
+
+
+def brain_query(query: str, area: str = "") -> str:
+    """Search the outreach brain (Brain) for anything relevant to a query.
+
+    Keyword-scored over per-business records, industries, strategies,
+    locations and insights. Returns a compact text block, best-effort.
+    """
+    from agents.brain import get_brain
+    q = (query or "").strip()
+    if not q:
+        return "(empty query)"
+    brain = get_brain()
+    words = [w for w in re.findall(r"[a-z0-9']{3,}", q.lower())
+             if w not in {"the", "what", "which", "who", "did", "have", "are",
+                          "for", "and", "was", "were", "their", "about", "with"}]
+    if not words:
+        words = re.findall(r"[a-z0-9']{3,}", q.lower())[:2]
+
+    # ── Per-business records (name + category + notes keyword match) ──
+    biz_hits = []
+    if area in ("", "all", "businesses"):
+        for rec in brain.list_businesses():
+            hay = " ".join(str(rec.get(k, "")) for k in
+                           ("name", "category", "notes")).lower()
+            matched = [w for w in words if w in hay]
+            if not matched:
+                continue
+            score = len(matched) + (2 if rec.get("name", "").lower() in q.lower() else 0)
+            parts = [f"{rec.get('name', '?')} ({rec.get('category', '?')})"]
+            if rec.get("rating"):
+                parts.append(f"rating={rec['rating']}")
+            if rec.get("gaps"):
+                parts.append("gaps: " + "; ".join(rec["gaps"][:2]))
+            if rec.get("email_hook"):
+                parts.append(f"hook: {rec['email_hook'][:100]}")
+            inters = rec.get("interactions", [])
+            if inters:
+                last = inters[-1]
+                parts.append(f"last: {last.get('type', '?')} {last.get('timestamp', '')[:10]}")
+            biz_hits.append((score, " - ".join(parts)))
+    biz_hits.sort(key=lambda t: -t[0])
+
+    # ── Industry lessons ──
+    ind_hits = []
+    if area in ("", "all", "industries"):
+        for name in brain.list_industries():
+            data = brain.get_industry(name)
+            hay = (name + " " + json.dumps(data, default=str)).lower()
+            matched = [w for w in words if w in hay]
+            if not matched:
+                continue
+            bits = [f"industry '{name}'"]
+            if data.get("pain_points"):
+                bits.append("pain: " + "; ".join(data["pain_points"][:2]))
+            if data.get("what_worked"):
+                bits.append("worked: " + ", ".join(data["what_worked"][:2]))
+            if data.get("what_failed"):
+                bits.append("failed: " + ", ".join(data["what_failed"][:2]))
+            ind_hits.append((len(matched), " - ".join(bits)))
+    ind_hits.sort(key=lambda t: -t[0])
+
+    # ── Strategies (what worked/failed by category) ──
+    strat_hits = []
+    if area in ("", "all", "strategies"):
+        try:
+            strategies = brain.get_strategies(q)
+        except Exception:
+            strategies = {"successful": [], "failed": [], "total_attempts": 0}
+        if strategies.get("total_attempts"):
+            strat_hits.append((3, f"strategy record for '{q}': "
+                                  f"{len(strategies.get('successful', []))} successes, "
+                                  f"{len(strategies.get('failed', []))} failures, "
+                                  f"{strategies['total_attempts']} attempts"))
+
+    # ── Insights ──
+    ins_hits = []
+    if area in ("", "all", "insights"):
+        for itype, entries in brain.get_insights().items():
+            for e in entries[-3:]:
+                low = (itype + " " + e.get("content", "")).lower()
+                if any(w in low for w in words):
+                    ins_hits.append((2, f"[{itype}] {e.get('content', '')[:160]}"))
+
+    sections = []
+    if biz_hits:
+        sections.append("BUSINESS INTEL:\n" + "\n".join("- " + t for _, t in biz_hits[:5]))
+    if ind_hits:
+        sections.append("INDUSTRY LESSONS:\n" + "\n".join("- " + t for _, t in ind_hits[:3]))
+    if strat_hits:
+        sections.append("STRATEGY RECORDS:\n" + "\n".join("- " + t for _, t in strat_hits))
+    if ins_hits:
+        sections.append("INSIGHTS:\n" + "\n".join("- " + t for _, t in ins_hits[:3]))
+
+    if not sections:
+        return "(brain has nothing matching that yet -- it grows as we run sessions)"
+    return "\n\n".join(sections)
 
 
 # ── Web search tool (the agents' own eyes) ──────────────────────────
@@ -377,11 +535,15 @@ def ask_agent(key: str, message: str, chat_history: list[dict] = None,
     Returns {agent, role, reply, used_web, learned, memory_count,
              tools_used, drafts_saved}.
     """
+    from agents.event_bus import emit
     spec = AGENTS.get((key or "").lower())
     if not spec:
         raise ValueError(f"Unknown agent: {key}")
     name = spec["name"]
     message = (message or "").strip() or "Introduce yourself and what you can help with."
+
+    emit("bot", bot=key or "unknown", status="thinking",
+         task=message[:80], source="ask_agent")
 
     memory_text = _recall(key, message)
 
@@ -397,13 +559,21 @@ def ask_agent(key: str, message: str, chat_history: list[dict] = None,
                 "used_web": False, "learned": False,
                 "memory_count": _memory_count(key)}
 
+    from agents.skills import skills_prompt, skill_names_for, mark_used
+    skills_block = skills_prompt(key or "")
+
     system = (f"{spec['persona']}\n\n"
-              f"WHAT YOU ALREADY KNOW (your own memory):\n{memory_text}\n\n"
-              f"Your tools: web_search (current facts), read_url (open a page "
-              f"you found or were given), vault_query (search the team's own "
-              f"notes -- use this before saying you don't know something about "
-              f"our past outreach), propose_draft (write an email into the "
-              f"user's review queue when they ask you to draft one). Call any "
+              + (skills_block + "\n\n" if skills_block else "")
+              + f"WHAT YOU ALREADY KNOW (your own memory):\n{memory_text}\n\n"
+              f"Your tools: brain_query (search the team's shared brain -- per-"
+              f"business intel, industry lessons, what outreach worked or failed; "
+              f"use this FIRST for anything about our own history), web_search "
+              f"(current public facts), read_url (open a page you found or were "
+              f"given), vault_query (search the user's Obsidian notes -- use this "
+              f"before saying you don't know something about our past outreach), "
+              f"propose_draft (write an email into the user's review queue when "
+              f"they ask you to draft one), learn_skill (save a reusable "
+              f"technique you discovered so the team keeps it forever). Call any "
               f"tool the moment you need it, then answer from what you got. "
               f"Never fabricate tool results.")
 
@@ -418,8 +588,11 @@ def ask_agent(key: str, message: str, chat_history: list[dict] = None,
     from google.genai import types
     from agents.config import get_ai_model
 
-    tool_decls = [{"function_declarations": [WEB_SEARCH_DECL, READ_URL_DECL,
-                                              VAULT_QUERY_DECL, PROPOSE_DRAFT_DECL]}]
+    tool_decls = [{"function_declarations": [BRAIN_QUERY_DECL, WEB_SEARCH_DECL,
+                                              READ_URL_DECL, VAULT_QUERY_DECL,
+                                              PROPOSE_DRAFT_DECL, LEARN_SKILL_DECL]}]
+
+    _injected_skills = skill_names_for(key or "")
 
     used_web = False
     tools_used = []
@@ -451,8 +624,24 @@ def ask_agent(key: str, message: str, chat_history: list[dict] = None,
                 fname = part.function_call.name
                 fargs = dict(part.function_call.args or {})
 
+            if fname == "brain_query":
+                emit("bot", bot=key or "unknown", status="reading-brain",
+                     task=str(fargs.get("query", ""))[:80], source="ask_agent")
+                brain_text = brain_query(fargs.get("query", ""),
+                                         fargs.get("area", ""))
+                tools_used.append("brain_query")
+                contents.append(model_content)
+                contents.append(types.Content(
+                    role="user",
+                    parts=[types.Part(function_response=types.FunctionResponse(
+                        name="brain_query", response={"result": brain_text}))],
+                ))
+                continue
+
             if fname == "web_search":
                 query = fargs.get("query", message)
+                emit("bot", bot=key or "unknown", status="searching-web",
+                     task=str(query)[:80], source="ask_agent")
                 search_text = web_search(query) or "(no results found for that)"
                 used_web = True
                 tools_used.append("web_search")
@@ -496,11 +685,33 @@ def ask_agent(key: str, message: str, chat_history: list[dict] = None,
                 tools_used.append("propose_draft")
                 if res.get("saved"):
                     drafts_saved += 1
+                    emit("packet", from_="strategist" if key == "strategist" else (key or "agent"),
+                         to="drafts", label=str(fargs.get("business_name", ""))[:30])
                 contents.append(model_content)
                 contents.append(types.Content(
                     role="user",
                     parts=[types.Part(function_response=types.FunctionResponse(
                         name="propose_draft", response={"result": res}))],
+                ))
+                continue
+
+            if fname == "learn_skill":
+                from agents.skills import learn_skill
+                saved = learn_skill(str(fargs.get("name", "")),
+                                    str(fargs.get("description", "")),
+                                    list(fargs.get("steps") or []),
+                                    agents=[key or "agent"])
+                tools_used.append("learn_skill")
+                emit("brain", action="skill " + ("refined" if saved.get("refined") else "learned"),
+                     detail=str(fargs.get("name", ""))[:60], source="ask_agent")
+                contents.append(model_content)
+                contents.append(types.Content(
+                    role="user",
+                    parts=[types.Part(function_response=types.FunctionResponse(
+                        name="learn_skill", response={"result": {
+                            "saved": True, "name": saved.get("name"),
+                            "refined": bool(saved.get("refined")),
+                            "note": "skill is now in the team library"}}))],
                 ))
                 continue
 
@@ -513,8 +724,9 @@ def ask_agent(key: str, message: str, chat_history: list[dict] = None,
                     parts=[types.Part(function_response=types.FunctionResponse(
                         name=fname,
                         response={"error": f"tool '{fname}' is not available. Use "
-                                            f"web_search, read_url, vault_query, or "
-                                            f"propose_draft -- or just answer directly."}))],
+                                            f"brain_query, web_search, read_url, "
+                                            f"vault_query, or propose_draft -- or "
+                                            f"just answer directly."}))],
                 ))
                 continue
 
@@ -536,6 +748,10 @@ def ask_agent(key: str, message: str, chat_history: list[dict] = None,
             reply = f"{name} couldn't finish that lookup. Ask again?"
 
     learned = _learn_from_chat(key, message, reply, used_web)
+    if tools_used:
+        mark_used([s for s in _injected_skills])
+    emit("bot", bot=key or "unknown", status="done" if reply else "error",
+         task=reply[:80] if reply else str(last_err)[:80], source="ask_agent")
     return {"agent": name, "role": spec["role"], "reply": reply,
             "used_web": used_web, "learned": learned,
             "memory_count": _memory_count(key),
@@ -606,9 +822,14 @@ def team_act(businesses: list[dict], session=None, top_n: int = 3,
     except Exception:
         pass
 
+    from agents.event_bus import emit
+    emit("team", team="all", status="briefing",
+         task=f"Working {len(targets)} prospect(s)")
+
     for biz in targets[:max_research]:
         name = biz["name"]
         # ── Scout researches ──
+        emit("packet", from_="pipeline", to="scout", label=name[:28])
         try:
             scout_out = ask_agent(
                 "scout",
@@ -623,6 +844,7 @@ def team_act(businesses: list[dict], session=None, top_n: int = 3,
             continue
 
         # ── Strategist writes the hook from Scout's findings ──
+        emit("packet", from_="scout", to="strategist", label=f"intel on {name[:22]}")
         try:
             strat_out = ask_agent(
                 "strategist",
@@ -646,6 +868,8 @@ def team_act(businesses: list[dict], session=None, top_n: int = 3,
                 _remember("strategist", name, f"Hook: {hook}")
         except Exception:
             pass
+        if hook:
+            emit("packet", from_="strategist", to="drafts", label=f"hook: {name[:24]}")
 
         # ── Outreach brain records the research (guarded) ──
         try:
@@ -659,6 +883,7 @@ def team_act(businesses: list[dict], session=None, top_n: int = 3,
             pass
 
     # ── Analyst debriefs the whole batch ──
+    emit("packet", from_="strategist", to="analyst", label="batch debrief")
     try:
         studied = "; ".join(f"{r['name']}{': ' + r['hook'] if r['hook'] else ''}"
                             for r in out["researched"]) or "nothing (research failed)"

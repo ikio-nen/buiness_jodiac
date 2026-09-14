@@ -89,6 +89,11 @@ class Brain:
             rec["interactions"] = rec["interactions"][-20:]
 
         self._write(self._biz_path(name), rec)
+        try:
+            from agents.event_bus import emit
+            emit("brain", action="learn", detail=name[:60])
+        except Exception:
+            pass
         return rec
 
     def get_business_context(self, name: str) -> str:
@@ -296,6 +301,11 @@ class Brain:
             cat_strategies["failed"] = cat_strategies["failed"][-10:]
 
         self._write(BRAIN_DIR / "strategies" / "email_patterns.json", strategies)
+        try:
+            from agents.event_bus import emit
+            emit("brain", action="strategy", detail=f"{category}: {outcome}")
+        except Exception:
+            pass
 
     def get_strategies(self, category: str) -> dict:
         """Get strategies for a category."""

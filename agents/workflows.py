@@ -38,8 +38,18 @@ def research_workflow(businesses: list[dict]) -> list[dict]:
     Every successful research result is also stored in the brain as
     per-business knowledge (agents/businesses/<name>.json).
     """
+    from agents.event_bus import emit
     from agents.business_research import research_batch
+    emit("bot", bot="analyst", status="thinking",
+         task=f"Researching {len(businesses)} business(es)", source="workflow")
     results = research_batch(businesses)
+    for r in results:
+        emit("bot", bot="analyst",
+             status="done" if not r.get("error") else "error",
+             task=f"{r.get('name', '?')}: rating={r.get('rating', '?')}, "
+                  f"gaps={len(r.get('gaps', []))}", source="workflow")
+        emit("packet", from_="analyst", to="brain",
+             label=str(r.get('name', '?'))[:26])
 
     # Feed the brain: one knowledge file per business
     try:
@@ -97,6 +107,14 @@ def search_businesses_workflow(location: str, radius: int,
 
     # Learn from this search
     learn_from_search(verified_businesses, location)
+    try:
+        from agents.event_bus import emit
+        emit("packet", from_="search", to="brain", label=location[:26])
+        emit("bot", bot="scout", status="done",
+             task=f"Found {len(verified_no_site)} no-site businesses in {location}",
+             source="workflow")
+    except Exception:
+        pass
 
     return {
         "geo_display": geo["display"],
@@ -222,9 +240,13 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
     Returns {drafts, errors, ai_used}.
     """
     from agents.business_research import format_research_for_email, get_research_for_business
+    from agents.event_bus import emit
     drafts = []
     errors = []
     ai_count = 0
+
+    emit("bot", bot="strategist", status="thinking",
+         task=f"Drafting {len(businesses)} email(s)", source="workflow")
 
     for biz in businesses:
         email = biz.get("email") or biz.get("enrichment", {}).get("email", "")
@@ -283,6 +305,8 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
         }, context={"sender_name": sender_name})
 
         # PDF
+        emit("bot", bot="strategist", status="writing-pdf",
+             task=str(biz["name"])[:60], source="workflow")
         pdf_path = ""
         try:
             pdf_path = generate_proposal_pdf(biz, sender_name)
@@ -290,6 +314,8 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
             errors.append({"name": biz["name"], "type": "pdf", "error": str(e)})
 
         # Website — only for businesses without one
+        emit("packet", from_="strategist", to="builder",
+             label=str(biz["name"])[:26])
         website_path = ""
         if not biz.get("website"):
             try:
@@ -316,6 +342,11 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
             draft["business"] = biz
             if email_result.output.get("ai_powered"):
                 ai_count += 1
+            emit("bot", bot="strategist", status="done",
+                 task=f"Draft for {biz['name']}: {draft.get('subject', '')[:50]}",
+                 source="workflow")
+            emit("packet", from_="strategist", to="drafts",
+                 label=str(biz["name"])[:26])
             # Learn from this draft
             learn_from_draft(category, draft.get("subject", ""), draft.get("body", ""))
             # Day-one brain memory: capture the draft itself, not just sends,
@@ -462,6 +493,7 @@ def review_and_send_workflow(drafts: list[dict], sender_name: str) -> dict:
 
 def send_emails_workflow(drafts: list[dict], sender_name: str) -> dict:
     """Send emails. Filters empty 'to'. Returns {sent, skipped, errors}."""
+    from agents.event_bus import emit
     skipped = [d for d in drafts if not d.get("to")]
     to_send = [d for d in drafts if d.get("to")]
 
@@ -487,6 +519,10 @@ def send_emails_workflow(drafts: list[dict], sender_name: str) -> dict:
             attachment_path=draft.get("attachment_path", ""),
         )
         if result["success"]:
+            emit("bot", bot="mailer", status="done",
+                 task=f"Sent to {draft['to']}", source="workflow")
+            emit("packet", from_="mailer", to="sent",
+                 label=str(biz.get("name", "?"))[:26])
             attached_name = Path(real_pdf).name if real_pdf else None
             rec_path = send_receipt_pdf(
                 business_name=biz.get("name", "Business"),
@@ -530,6 +566,8 @@ def send_emails_workflow(drafts: list[dict], sender_name: str) -> dict:
         else:
             errors.append({"name": biz.get("name", "?") if biz else "?",
                           "error": result.get("error", "Unknown")})
+            emit("bot", bot="mailer", status="error",
+                 task=f"Failed: {biz.get('name', '?')}", source="workflow")
             learn_from_send(
                 draft.get("business", {}).get("category", "unknown"),
                 draft.get("subject", ""),
@@ -563,6 +601,9 @@ def send_emails_workflow(drafts: list[dict], sender_name: str) -> dict:
 def obsidian_sync_workflow(businesses: list[dict], session_id: str,
                           project_name: str, approached: list[dict] = None) -> dict:
     """Sync everything to Obsidian — all 7 note types with cross-links."""
+    from agents.event_bus import emit
+    emit("bot", bot="librarian", status="thinking",
+         task=f"Syncing {len(businesses)} business(es) to Obsidian", source="workflow")
     paths = []
 
     # 1. Project note
@@ -627,6 +668,8 @@ def obsidian_sync_workflow(businesses: list[dict], session_id: str,
         pass
 
     # 10. Update vault index
+    emit("bot", bot="librarian", status="done",
+         task=f"Vault synced: {len(paths)} notes", source="workflow")
     idx = update_vault_index()
     paths.append(idx)
 
@@ -662,11 +705,18 @@ def run_outreach_pipeline(location: str, radius: int, session_id: str,
         "errors": [],
     }
 
+    from agents.event_bus import emit
+
     # 1. SEARCH
+    emit("step", phase="search", message=f"Hunting businesses in {location}...", done=False)
     search = search_businesses_workflow(location, radius, category=category)
     if "error" in search:
+        emit("step", phase="search", message=f"Search failed: {search['error']}", done=True, failed=True)
         report["errors"].append({"step": "search", "error": search["error"]})
         return report
+    emit("step", phase="search",
+         message=f"Found {len(search['businesses'])} businesses "
+                 f"({len(search['no_site'])} without website)", done=True)
     report["search"] = {
         "total": len(search["businesses"]),
         "no_site": len(search["no_site"]),
@@ -677,6 +727,8 @@ def run_outreach_pipeline(location: str, radius: int, session_id: str,
     # 2. SCRAPE (Scrapling — get contact details from websites)
     businesses_with_site = search["with_site"]
     if businesses_with_site:
+        emit("step", phase="scrape", message=f"Scraping {len(businesses_with_site[:20])} websites...", done=False)
+        emit("packet", from_="search", to="scraper", label="with-site list")
         scraped = scrape_businesses_workflow(businesses_with_site[:20])
         # Merge scraped data back
         scraped_map = {b["name"]: b for b in scraped}
@@ -694,6 +746,8 @@ def run_outreach_pipeline(location: str, radius: int, session_id: str,
     #      the with-site businesses, so we get phone + email for both.
     hunter_key = get_hunter_key()
     if hunter_key and businesses_with_site:
+        emit("step", phase="enrich", message="Looking up emails via Hunter...", done=False)
+        emit("packet", from_="scraper", to="enricher", label="domains")
         enrich_result = enrich_workflow(businesses_with_site[:20], hunter_key)
         report["enrich"] = {
             "enriched": enrich_result["enriched_count"],
@@ -709,6 +763,8 @@ def run_outreach_pipeline(location: str, radius: int, session_id: str,
         if businesses_with_site:
             maps_targets.extend(businesses_with_site[:20])
         if maps_targets:
+            emit("step", phase="enrich", message="Maps/Google contact fallback...", done=False)
+            emit("packet", from_="scraper", to="enricher", label="contact hunt")
             maps_result = enrich_workflow(maps_targets, "")
             report["enrich"] = {
                 "enriched": maps_result["enriched_count"],
@@ -725,6 +781,7 @@ def run_outreach_pipeline(location: str, radius: int, session_id: str,
             phones_csv = write_phones_csv(search["businesses"])
     except Exception:
         phones_csv = ""
+    emit("step", phase="enrich", message="Enrichment done", done=True)
 
     # Return here — caller handles selection + send + sync
     report["businesses"] = search["businesses"]

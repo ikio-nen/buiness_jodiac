@@ -41,6 +41,9 @@
 - **Business profile** lives in config.json under `business_profile` key. Flows into AI prompts via `get_business_context()`.
 - **Industry research cache**: `knowledge_base/industry_research.json` — new industries researched via Gemini and cached. Empty string categories must return fallback immediately (was caching `""` as a real industry).
 - **jarvis.py** is now a thin dispatcher (~330 lines). Heavy logic lives in: `pipeline_handler.py`, `chat_handler.py`, `setup_handler.py`, `dashboard_handler.py`.
+- **Event bus**: `agents/event_bus.py` is a thread-safe pub/sub. Workflows, brain, and agent_team `emit()` telemetry; `web/server.py` subscribes per-WebSocket and forwards as `agent_event` frames. Kinds: `bot`, `packet`, `brain`, `step`, `team`. Emit must never raise — telemetry can't break the pipeline.
+- **Brain ↔ bots channel**: specialist agents (scout/strategist/analyst) have a `brain_query` tool (`agents/agent_team.py`) that keyword-searches the outreach brain (businesses, industries, strategies, insights). Prompt tells them to check brain_query BEFORE web_search for our own history.
+- **Agent Ops floor**: `index.html` `#opsFloor` + `app.js` ops section animate little bots between stations on `agent_event` WS frames. Station positions are CSS %; adding a station means HTML + CSS position + `app.js` routing maps (`BOT_HOME`, packet to/from mapping).
 
 ## Chatbot Patterns
 
@@ -49,13 +52,14 @@
 - Chat memory (`chat_memory.py`) stores all messages in SQLite at `F:/jodiac/agent_output/memory/conversations.db`. Use `get_memory(session_id)` to get the active memory instance.
 - The chatbot passes conversation context (last 10 messages) AND session state (businesses found, drafts, profile) to Gemini so it can reference earlier turns.
 - SQLite uses `PRAGMA journal_mode=WAL` for concurrent reads/writes (CLI + WebSocket can access the same DB). Close connections in `finally` blocks to prevent leaks on WebSocket disconnect.
+- `chat_memory.get_memory()` caches ONE shared `ChatMemory`; `close_memory()` (WS disconnect) closes that connection — any code still holding the cached instance crashes with "Cannot operate on a closed database". Fix lives in `ChatMemory._ensure()`: every method re-opens the connection if closed. Never assume `.conn` stays valid across a disconnect.
 - Adding a new ActionType requires updating THREE files: `chatbot.py` (parsing + function call handler), `chat_handler.py` (CLI dispatch), `web/server.py` (WebSocket dispatch).
 
 ## Web UI (FastAPI)
 
 - FastAPI + WebSocket server at `agents/web/server.py`. Start with `python -m agents.web.server` or press `[W]` in main menu.
 - Port 8765 (default). If port is busy, kill existing process or change port in `server.py`.
-- Static files in `agents/web/static/`: `index.html`, `style.css`, `app.js`. Black/red/white terminal theme.
+- Static files in `agents/web/static/`: `index.html`, `style.css`, `app.js`. Two-pane agent-office: living pixel floor LEFT, command center (chat/agents/skills tabs) RIGHT (~65/35), roster strip along the bottom. Warm Ghibli pixel theme (cream/moss/wood) — NOT the old black/red cyberpunk. Bump `?v=N` on the css/js `<link>`/`<script>` in index.html when shipping asset changes, or browsers serve stale cached assets.
 - WebSocket endpoint at `/ws` for real-time chat. Sends JSON messages with `type` field (jarvis/thinking/progress/search_result/draft_result/send_result/research_result/error).
 - The chat UI uses Gemini for ALL intent parsing (not regex). Greetings and help are fast-pathed locally.
 - `chat_handler.py` is the CLI mode (menu `[C]`). Web UI goes through `web/server.py` WebSocket handler independently.
@@ -85,4 +89,6 @@
 - `ai_design.py` + `medium.py`: changing email prompt structure requires updating BOTH agents (AI and template) to stay consistent.
 - `industry_learner.py` + `ai_design.py` + `medium.py`: industry context flows from learner → both email agents. All three must agree on the data format.
 - `chatbot.py` + `chat_handler.py` + `web/server.py`: all three parse user intent. If you change ActionType or add new actions, update ALL three (chatbot for parsing, chat_handler for CLI dispatch, web/server.py for WebSocket dispatch).
+- `event_bus.py` consumers: adding a new event `kind` requires updating `VALID_KINDS` in `event_bus.py` AND the `handleAgentEvent` switch in `web/static/app.js` (plus optional CSS).
+- `skills.py` ↔ `agent_team.py`: skills flow library → `skills_prompt()` into each agent's system prompt; the `learn_skill` tool writes back via `learn_skill()`. New agent keys must exist in BOTH `agent_team.py AGENTS` and the frontend maps (`BOT_HOME`, `BOT_LOOK`, `ROSTER_META` in `app.js`) or events render as a generic sprite at the brain.
 - `chat_memory.py`: used by both `chat_handler.py` (CLI) and `web/server.py` (WebSocket). Schema changes require both consumers to be updated.

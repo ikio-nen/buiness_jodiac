@@ -3,120 +3,226 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>J.A.R.V.I.S</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <title>J.A.R.V.I.S — Agent Office</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css?v=8">
 </head>
 <body>
-  <!-- Matrix rain canvas -->
-  <canvas id="matrix"></canvas>
+  <div class="app">
 
-  <!-- Main container -->
-  <div class="container">
-    <!-- Header -->
-    <header class="header">
-      <div class="header-left">
-        <div class="logo">
-          <span class="logo-bracket">[</span>
-          <span class="logo-text">J.A.R.V.I.S</span>
-          <span class="logo-bracket">]</span>
-        </div>
-        <div class="status-dot" id="statusDot"></div>
-        <span class="status-text" id="statusText">Connecting...</span>
+    <!-- ── Top bar ─────────────────────────────────────────────── -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="logo-chip">J.A.R.V.I.S</span>
+        <span class="topbar-note" id="sessionInfo"></span>
+        <span class="clock-chip" id="clockChip" title="Office time — the room dims with the real clock">
+          <i class="clock-icon" id="clockIcon">☀</i>
+          <span id="clockText">--:--</span>
+        </span>
       </div>
-      <div class="header-right">
-        <span class="session-info" id="sessionInfo"></span>
-        <button class="btn-icon" id="historyBtn" title="Conversation History">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-          </svg>
-        </button>
-        <button class="btn-icon" id="statusBtn" title="System Status">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M12 20V10M18 20V4M6 20v-4"/>
-          </svg>
-        </button>
+      <div class="topbar-right">
+        <span class="conn" id="connChip"><i class="conn-dot" id="statusDot"></i><span id="statusText">connecting…</span></span>
+        <button class="icon-btn" id="musicBtn" title="Music corner — lo-fi for the office">♪</button>
+        <button class="icon-btn" id="historyBtn" title="Conversation history">▤</button>
+        <button class="icon-btn" id="statusBtn" title="System status">◉</button>
       </div>
     </header>
 
-    <!-- Sidebar -->
-    <aside class="sidebar" id="sidebar">
-      <div class="sidebar-header">
-        <span>CONVERSATIONS</span>
-        <button class="btn-close" id="closeSidebar">&times;</button>
+    <!-- ── Left: the office floor ──────────────────────────────── -->
+    <section class="floor" id="opsFloor">
+      <div class="room" id="opsStage">
+        <div class="wall-strip"></div>
+        <div class="room-shade" id="roomShade" aria-hidden="true"></div>
+
+        <!-- furniture zones (stations) -->
+        <div class="station station-scout" id="station-scout" title="Scout: finds and vets businesses">
+          <div class="fur fur-desk"><span class="desk"></span><span class="mon"><i></i></span><span class="chair"></span></div>
+          <div class="zone-label">SCOUT</div>
+        </div>
+        <div class="station station-analyst" id="station-analyst" title="Analyst: numbers and debriefs">
+          <div class="fur fur-desk"><span class="desk"></span><span class="mon"><i></i></span><span class="chair"></span></div>
+          <div class="zone-label">ANALYST</div>
+        </div>
+        <div class="station station-scraper" id="station-scraper" title="Scraper: reads business websites">
+          <div class="fur fur-desk"><span class="desk"></span><span class="mon"><i></i></span><span class="chair"></span></div>
+          <div class="zone-label">SCRAPER</div>
+        </div>
+        <div class="station station-enricher" id="station-enricher" title="Enricher: hunts contact info">
+          <div class="fur fur-desk"><span class="desk"></span><span class="mon"><i></i></span><span class="chair"></span></div>
+          <div class="zone-label">ENRICHER</div>
+        </div>
+        <div class="station station-builder" id="station-builder" title="Builder: makes demo websites + PDFs">
+          <div class="fur fur-desk"><span class="desk"></span><span class="mon"><i></i></span><span class="chair"></span></div>
+          <div class="zone-label">BUILDER</div>
+        </div>
+        <div class="station station-mailer" id="station-mailer" title="Mailer: sends the emails">
+          <div class="fur fur-desk"><span class="desk"></span><span class="mon"><i></i></span><span class="chair"></span></div>
+          <div class="zone-label">MAILER</div>
+        </div>
+        <div class="station station-strategist" id="station-strategist" title="Strategist: turns intel into angles and drafts">
+          <div class="fur fur-table"><span class="table"></span><span class="paper p1"></span><span class="paper p2"></span></div>
+          <div class="zone-label">STRATEGIST</div>
+        </div>
+        <div class="station station-drafts" id="station-drafts" title="Draft queue: emails awaiting your review">
+          <div class="fur fur-meeting"><span class="mtable"></span><span class="paper p1"></span><span class="paper p2"></span><span class="paper p3"></span></div>
+          <div class="zone-label">DRAFTS</div>
+        </div>
+        <div class="station station-sent" id="station-sent" title="Sent: emails that went out">
+          <div class="fur fur-tray"><span class="tray t1"></span><span class="tray t2"></span></div>
+          <div class="zone-label">SENT</div>
+        </div>
+        <div class="station station-brain" id="station-brain" title="The brain: everything we learn is stored here">
+          <div class="fur fur-rack"><span class="rack-unit"><i></i><i></i><i></i></span></div>
+          <div class="zone-label">BRAIN</div>
+        </div>
+
+        <!-- decor -->
+        <div class="plant plant-1"><i></i><i></i><i></i></div>
+        <div class="plant plant-2"><i></i><i></i><i></i></div>
+        <div class="rug"></div>
+        <div class="window w1"></div>
+        <div class="window w2"></div>
+        <div class="window w3"></div>
+        <div class="door"></div>
+
+        <!-- live layers -->
+        <svg id="fxSvg"></svg>
+        <div id="botsLayer"></div>
+        <div id="packetsLayer"></div>
+
+        <!-- office log ticker -->
+        <div class="ops-feed" id="opsFeed">
+          <div class="ops-feed-line ops-idle">the office is quiet — run a search or “team act”</div>
+        </div>
+        <span class="live-chip" id="opsLive"><i></i>LIVE</span>
       </div>
-      <div class="sidebar-list" id="conversationList">
-        <div class="sidebar-empty">No conversations yet</div>
+    </section>
+
+    <!-- ── Right: command center ───────────────────────────────── -->
+    <aside class="cmd">
+      <div class="cmd-head">
+        <span class="cmd-ava"><div class="sp-hair" style="background:#c0c0c8"></div><div class="sp-face"></div><div class="sp-body" style="background:#c1666b"></div></span>
+        <div class="cmd-title">
+          <b>J.A.R.V.I.S</b> <span class="idle-chip">⌂ runs the floor</span>
+        </div>
+      </div>
+
+      <nav class="tabs">
+        <button class="tab is-active" data-tab="chat">💬 chat</button>
+        <button class="tab" data-tab="agents">🕵 agents</button>
+        <button class="tab" data-tab="skills">📚 skills</button>
+      </nav>
+
+      <div class="cmd-stats" id="opsStats">—</div>
+
+      <!-- CHAT TAB -->
+      <div class="tabpane is-active" data-pane="chat">
+        <main class="messages" id="messages"></main>
+        <div class="quick-chips" id="quickActions">
+          <button class="chip" data-action="search">🔍 search</button>
+          <button class="chip" data-action="draft">✏️ draft</button>
+          <button class="chip" data-action="research">📖 research</button>
+          <button class="chip" data-action="send">📤 send</button>
+          <button class="chip" data-action="status">📊 status</button>
+          <button class="chip" data-action="dashboard">🗂 dashboard</button>
+        </div>
+        <div class="composer">
+          <div class="activity-strip" id="activityStrip">office idle — run a search or “team act”</div>
+          <div class="composer-box">
+            <span class="composer-prompt">&gt;</span>
+            <input type="text" id="userInput" placeholder="Message JARVIS…"
+                   autocomplete="off" spellcheck="false">
+            <button class="composer-send" id="sendBtn" title="Send">➤</button>
+          </div>
+          <div class="composer-hint">enter to send · ↑↓ history · “team act” · “ask scout …”</div>
+        </div>
+      </div>
+
+      <!-- AGENTS TAB -->
+      <div class="tabpane" data-pane="agents">
+        <div class="pane-scroll" id="agentsPane">
+          <div class="pane-note">Click an agent to see their memory and skills. Assign skills to change how they work.</div>
+          <div id="agentsList"></div>
+        </div>
+      </div>
+
+      <!-- SKILLS TAB -->
+      <div class="tabpane" data-pane="skills">
+        <div class="pane-scroll" id="skillsPane">
+          <div class="pane-note">The team's shared playbook. Skills are injected into agent prompts — toggle, add, or remove anytime. Agents learn new ones themselves.</div>
+          <div class="skills-stats" id="skillsStats"></div>
+          <div id="skillsList"></div>
+          <details class="add-skill" id="addSkillBox">
+            <summary>+ teach a new skill</summary>
+            <form id="addSkillForm">
+              <label>name
+                <input type="text" id="skillName" placeholder="e.g. festival-season-timing" required>
+              </label>
+              <label>when to use it
+                <input type="text" id="skillDesc" placeholder="One sentence describing the technique" required>
+              </label>
+              <label>steps (one per line)
+                <textarea id="skillSteps" rows="4" placeholder="Find the fact in source A&#10;Confirm in source B&#10;Report or mark unverified" required></textarea>
+              </label>
+              <label>who gets it</label>
+              <div class="agent-chips" id="skillAgents">
+                <label class="agent-chip"><input type="checkbox" value="scout" checked>scout</label>
+                <label class="agent-chip"><input type="checkbox" value="strategist">strategist</label>
+                <label class="agent-chip"><input type="checkbox" value="analyst">analyst</label>
+                <label class="agent-chip"><input type="checkbox" value="mailer">mailer</label>
+                <label class="agent-chip"><input type="checkbox" value="*" id="skillAll">everyone</label>
+              </div>
+              <button type="submit" class="btn btn-primary">add to library</button>
+            </form>
+          </details>
+        </div>
       </div>
     </aside>
 
-    <!-- Chat area -->
-    <main class="chat-area" id="chatArea">
-      <div class="messages" id="messages">
-        <!-- Messages rendered here -->
-      </div>
-    </main>
-
-    <!-- Quick actions -->
-    <div class="quick-actions" id="quickActions">
-      <button class="quick-btn" data-action="search">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
-        Search
-      </button>
-      <button class="quick-btn" data-action="draft">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
-          <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
-        </svg>
-        Draft
-      </button>
-      <button class="quick-btn" data-action="research">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z"/>
-          <path d="M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/>
-        </svg>
-        Research
-      </button>
-      <button class="quick-btn" data-action="send">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
-        </svg>
-        Send
-      </button>
-      <button class="quick-btn" data-action="status">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 20V10M18 20V4M6 20v-4"/>
-        </svg>
-        Status
-      </button>
-      <button class="quick-btn" data-action="dashboard">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
-          <rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/>
-        </svg>
-        Dashboard
-      </button>
-    </div>
-
-    <!-- Input area -->
-    <div class="input-area">
-      <div class="input-wrapper">
-        <span class="input-prompt">&gt;</span>
-        <input type="text" id="userInput" placeholder="Type a command or ask JARVIS..."
-               autocomplete="off" spellcheck="false">
-        <button class="send-btn" id="sendBtn" title="Send">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="22" y1="2" x2="11" y2="13"/>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-          </svg>
-        </button>
-      </div>
-      <div class="input-hint">
-        Press Enter to send | Up/Down for history | /help for commands
-      </div>
-    </div>
+    <!-- ── Bottom: team roster strip ───────────────────────────── -->
+    <footer class="roster-strip">
+      <div class="roster-scroller" id="opsRoster"></div>
+      <button class="add-skill-btn" id="teachBtn" title="Teach the team a new skill">＋<br>skill</button>
+    </footer>
   </div>
+
+  <!-- Music corner -->
+  <aside class="music-corner" id="musicCorner">
+    <div class="music-head">
+      <span class="music-title">♫ MUSIC CORNER</span>
+      <button class="btn-close" id="closeMusic">&times;</button>
+    </div>
+    <div class="music-now">
+      <div class="vinyl" id="vinyl"><i></i></div>
+      <div class="music-meta">
+        <b id="musicStation">lo-fi office</b>
+        <span id="musicDesc">warm tape hiss · soft keys</span>
+      </div>
+    </div>
+    <div class="music-stations" id="musicStations">
+      <button class="station-btn is-active" data-station="lofi">lo-fi office</button>
+      <button class="station-btn" data-station="rain">monsoon rain</button>
+      <button class="station-btn" data-station="night">midnight synth</button>
+    </div>
+    <div class="music-controls">
+      <button class="music-play" id="musicPlay" title="Play/pause">▶</button>
+      <input type="range" id="musicVol" min="0" max="100" value="35" title="Volume">
+    </div>
+    <div class="music-note">generated live in your browser — no files, no streaming</div>
+  </aside>
+
+  <!-- Conversations drawer -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <span>CONVERSATIONS</span>
+      <button class="btn-close" id="closeSidebar">&times;</button>
+    </div>
+    <div class="sidebar-list" id="conversationList">
+      <div class="sidebar-empty">No conversations yet</div>
+    </div>
+  </aside>
 
   <!-- Status panel -->
   <div class="status-panel" id="statusPanel" style="display:none;">
@@ -124,11 +230,9 @@
       <span>SYSTEM STATUS</span>
       <button class="btn-close" id="closeStatus">&times;</button>
     </div>
-    <div class="status-content" id="statusContent">
-      Loading...
-    </div>
+    <div class="status-content" id="statusContent">Loading…</div>
   </div>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js?v=10"></script>
 </body>
 </html>

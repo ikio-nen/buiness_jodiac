@@ -6,6 +6,7 @@ No more brittle regex matching. Gemini has full session context.
 import json
 import random as _random
 import re
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -293,6 +294,11 @@ def parse_intents(user_input: str, context: list[dict] = None,
     if lower in ("help", "commands", "options", "?", "what can you do"):
         return [Action(type=ActionType.HELP, response="")]
 
+    # Quick status check (no API call) — must answer instantly even when
+    # a long pipeline is running and the AI quota is exhausted.
+    if lower in ("status", "show status", "system status", "where are we", "progress"):
+        return [Action(type=ActionType.STATUS, response="")]
+
     # Quick check-in triggers (no API call)
     CHECKIN_TRIGGERS = (
         "check in", "checkin", "check-up", "whats new", "what's new",
@@ -389,15 +395,36 @@ def _parse_with_gemini(user_input: str, context: list[dict] = None,
         from agents.config import get_ai_model
         model = get_ai_model()
 
-        response = client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=types.GenerateContentConfig(
-                system_instruction=system,
-                tools=_TOOLS,
-                temperature=0.3,
-            ),
-        )
+        # Quota-proof call: free-tier 429s carry a retryDelay ("Please retry
+        # in 18s"); honor it instead of degrading to "I'm not sure what you
+        # mean" mid-conversation.
+        response = None
+        for attempt in range(3):
+            try:
+                response = client.models.generate_content(
+                    model=model,
+                    contents=contents,
+                    config=types.GenerateContentConfig(
+                        system_instruction=system,
+                        tools=_TOOLS,
+                        temperature=0.3,
+                    ),
+                )
+                break
+            except Exception as e:
+                msg = str(e)
+                if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
+                    import re as _re
+                    wait = 0
+                    m = _re.search(r"retry in (\d+)s", msg, _re.I)
+                    if m:
+                        wait = int(m.group(1)) + 1
+                    wait = min(wait or (6 * (attempt + 1)), 25)
+                    if attempt < 2:
+                        print(f"  [AI] Quota hit — waiting {wait}s before retry")
+                        time.sleep(wait)
+                        continue
+                raise
 
         # Parse function call response -- ALL parts, not just the first.
         if response.candidates and response.candidates[0].content:
