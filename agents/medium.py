@@ -17,6 +17,60 @@ from pathlib import Path
 
 from .base import BaseAgent, Complexity, Task
 
+# ── Goal-specific copy ──────────────────────────────────────────────
+# The pitch changes with what this search is selling, so hooks and subjects are
+# selected by goal. {biz} and {product} are filled in per business.
+
+HOOKS_BY_GOAL = {
+    "cad_licensing": {
+        "training": "How does {biz} license the software when a new batch starts? We supply genuine {product} seat by seat, so a CAD batch can start the moment students enrol.",
+        "college": "Does {biz} license a seat for every lab machine, or just the main lab? We quote the whole department at education pricing.",
+        "polytechnic": "Across {biz}'s trades, how many drafting seats are being licensed this year? We can cover all of them on one quotation.",
+        "school": "If {biz} runs a computer stream, keeping those lab machines on real licences is the usual headache. We cover a whole classroom at per-lab pricing.",
+        "university": "How does {biz} manage licences across departments? We handle volume licensing and the compliance paperwork that comes with it.",
+        "computer": "How is the lab at {biz} licensed for software the students actually need? We supply genuine {product} for the machines you already have.",
+        "*": "Most institutes we work with were running trial software until it expired mid-session. For {biz}, we would supply genuine {product} licensed for every machine in the lab.",
+    },
+    "website": {
+        "school": "Parents compare {biz} with three other institutes before they ever call. We build the site that makes that comparison come out in your favour.",
+        "college": "Admissions, results and enquiries all start online. {biz} should own that first impression instead of leaving it to a directory listing.",
+        "clinic": "When someone searches for a clinic near them, {biz} should be the first result with hours, doctors and a booking form on it.",
+        "hospital": "Patients check online before they call. A clear, current site for {biz} turns those searches into appointments.",
+        "pharmacy": "People near {biz} search for what you stock every day. A simple site puts your shelves in front of them.",
+        "hotel": "Right now {biz}'s rooms are only bookable through platforms that take a cut. A site of your own takes direct bookings.",
+        "restaurant": "Your menu, timings and location should live somewhere you own - not only on someone else's listing.",
+        "cafe": "Your menu, timings and photos deserve a home of your own. We build a simple site for {biz} that shows up in local search.",
+        "shop": "Customers within a few kilometres of {biz} search for exactly what you stock. A site puts that stock in front of them.",
+        "*": "I took a look at how {biz} shows up online and saw a few things worth fixing. We build the site that turns those searches into customers.",
+    },
+    "custom": {
+        "*": "I came across {biz} and thought {product} might be worth a short conversation.",
+    },
+}
+
+SUBJECTS_BY_GOAL = {
+    "cad_licensing": (
+        "{product} for {biz}'s lab",
+        "Licensed {product} - institutional pricing",
+        "Quick question about {biz}'s computer lab",
+        "Genuine {product} for {biz}",
+        "5-min chat about lab licensing at {biz}?",
+    ),
+    "website": (
+        "A website for {biz}",
+        "Quick idea for {biz}'s online presence",
+        "Found {biz} online - a thought on your site",
+        "{biz} + a modern website = more enquiries",
+        "5-min chat about {biz}'s website?",
+    ),
+    "custom": (
+        "{product} for {biz}",
+        "Quick idea for {biz}",
+        "Saw {biz} - had an idea to share",
+        "5-min chat about {product}?",
+    ),
+}
+
 
 class MediumAgent(BaseAgent):
     """Mid-tier agent — uses templates + heuristics, no LLM calls.
@@ -78,24 +132,22 @@ class MediumAgent(BaseAgent):
         contact_name = _safe(payload.get("contact_name", ""))
         category = payload.get("category", "")
         sender_name = ctx.get("sender_name", "the team")
-        service = ctx.get("service", "a professional website")
         tone = payload.get("tone", "professional")
+
+        # What this search sells drives every line of copy below. The goal is
+        # resolved from the action payload, not assumed from the account profile.
+        from .icp import target_profile, product_line, resolve_goal
+        profile = target_profile()
+        goal = resolve_goal(explicit=payload.get("goal", ""))
+        product = product_line(goal)
 
         greeting = f"Hi {contact_name}," if contact_name else f"Hi there,"
 
-        # Category-specific hook — enhanced by learning context
-        hooks = {
-            "food_and_drink": f"I noticed {biz_name} has great reviews online, and I thought a fresh website could bring in even more customers.",
-            "retail": f"I came across {biz_name} while researching local businesses - an online presence could really help you reach more shoppers.",
-            "healthcare": f"As a healthcare provider, {biz_name} could benefit from a professional site that makes it easy for patients to find and book you.",
-            "professional": f"For a professional services firm like {biz_name}, credibility online is everything - let me help with that.",
-            "home_services": f"I saw that {biz_name} is active in the area. A clean website with booking could streamline your workflow.",
-            "education": f"As an educational institution, {biz_name} could reach more families and students with a professional online presence.",
-            "shop": f"I came across {biz_name} while researching local shops - a modern website could help you reach customers beyond the neighborhood.",
-        }
-        # Use learning context for better hooks if available
+        # Vertical hook, enhanced by learning context if we have any.
+        template = (HOOKS_BY_GOAL.get(goal["key"]) or HOOKS_BY_GOAL["custom"])
+        raw = template.get(category) or template["*"]
+        hook = raw.format(biz=biz_name, product=product)
         learning_ctx = payload.get("learning_context", "")
-        hook = hooks.get(category, f"I came across {biz_name} and was impressed by what you do.")
         if learning_ctx:
             # First try: research-specific hook ("Suggested opening: ...")
             for line in learning_ctx.split("\n"):
@@ -105,7 +157,7 @@ class MediumAgent(BaseAgent):
                         hook = research_hook
                         break
             # Second try: learned hooks from past sessions
-            if hook == hooks.get(category, "") and "best hooks" in learning_ctx:
+            if hook == raw.format(biz=biz_name, product=product) and "best hooks" in learning_ctx:
                 for line in learning_ctx.split("\n"):
                     if line.strip().startswith('- "'):
                         learned_hook = line.strip().strip('- "').rstrip('"')
@@ -113,11 +165,8 @@ class MediumAgent(BaseAgent):
                             hook = learned_hook.format(biz_name=biz_name) if '{biz_name}' in learned_hook else f"{learned_hook} That's why I thought of {biz_name}."
                             break
 
-        # Get business profile for personalized body
-        from .config import get_business_profile
-        profile = get_business_profile()
-        product = profile.get("product", "professional websites")
-        value_prop = profile.get("value_proposition", "Most of our clients see a noticeable uptick in calls and visits within the first month.")
+        value_prop = (profile.get("value_proposition") or profile.get("what_makes_special")
+                      or f"{product} supplied directly, with support included.")
 
         # Per-business brain memory (rating, gaps, past contact): cite what we
         # know about THIS business, and follow up if we already emailed them.
@@ -151,7 +200,7 @@ class MediumAgent(BaseAgent):
 
         # Get industry pain points for a more relevant email
         from .industry_learner import get_or_research_industry
-        industry = get_or_research_industry(category)
+        industry = get_or_research_industry(category, product=product)
         pain_point = industry.get("pain_points", [""])[0] if industry.get("pain_points") else ""
         pain_section = f"\nI understand that {pain_point.lower()}" if pain_point else ""
 
@@ -159,7 +208,7 @@ class MediumAgent(BaseAgent):
 
 {hook}{pain_section}
 
-We offer {product} - no templates, no hassle. {value_prop}{memory_section}
+We supply {product} for institutions. {value_prop}{memory_section}
 {cta}
 
 Best,
@@ -179,13 +228,11 @@ Best,
         biz_name = payload.get("business_name", "")
         category = payload.get("category", "")
 
-        templates = [
-            f"Quick idea for {biz_name}'s online presence",
-            f"Free website mockup for {biz_name}?",
-            f"{biz_name} + a modern website = more customers",
-            f"Saw {biz_name} - had an idea to share",
-            f"5-min chat about {biz_name}'s website?",
-        ]
+        from .icp import product_line, resolve_goal
+        goal = resolve_goal(explicit=payload.get("goal", ""))
+        product = product_line(goal)
+        raws = SUBJECTS_BY_GOAL.get(goal["key"]) or SUBJECTS_BY_GOAL["custom"]
+        templates = [t.format(biz=biz_name, product=product) for t in raws]
 
         return {
             "subject": templates[0],

@@ -20,6 +20,7 @@ from agents.config import (
     save_session_data,
 )
 from agents import Orchestrator
+from agents.icp import delivers_websites
 from agents.learn import (
     learn_from_search, learn_from_draft, learn_from_send,
     learn_from_rejection, record_draft_feedback, get_learning_context,
@@ -79,40 +80,79 @@ def research_workflow(businesses: list[dict]) -> list[dict]:
 
 
 def search_businesses_workflow(location: str, radius: int,
-                              category: str = "") -> dict:
-    """Search for businesses. Returns {geo_display, businesses, no_site, with_site} or error."""
+                              category: str = "", goal: str = "") -> dict:
+    """Search for businesses. Returns {geo_display, businesses, no_site, with_site,
+    filter_report, icp, goal} or error.
+
+    ``goal`` is what we are selling on this search (see agents/icp.py); it is
+    resolved from the user's own phrasing when not given explicitly, because the
+    target changes from search to search.
+    """
     if not location:
         return {"error": "No location provided"}
+
+    # The goal decides what we sell on THIS search and drives both the ICP
+    # ranking and the Google Maps failover query, so resolve it first.
+    from agents.icp import rank as icp_rank, learn as icp_learn, resolve_goal
+    goal_obj = resolve_goal(request=category, explicit=goal)
 
     geo = geocode(location)
     if not geo:
         return {"error": "Could not find that location"}
 
-    # Always search ALL categories for comprehensive results
+    # Always search ALL categories, then let the ICP decide who is actually a
+    # customer. Searching everything and filtering afterwards is deliberate:
+    # pre-filtering by OSM tag misses the institutions whose tags are wrong.
     businesses = search_businesses(geo["lat"], geo["lon"], radius)
+    maps_source = ""
+    if not businesses:
+        # Overpass came up empty (rate-limited, no OSM data for the area, or
+        # everything non-commercial). With a Google Maps provider key set,
+        # fail over instead of reporting a dead end.
+        try:
+            from agents.gmaps_source import available, search_gmaps
+            from agents.event_bus import emit
+            if available():
+                emit("bot", bot="scout", status="thinking",
+                     task="Overpass empty — switching to Google Maps",
+                     source="workflow")
+                businesses = search_gmaps(geo["lat"], geo["lon"], radius,
+                                          category=category, goal=goal_obj)
+                maps_source = "gmaps" if businesses else ""
+        except Exception as e:
+            print(f"  [SEARCH] Google Maps failover failed: {e}")
 
-    # Filter by intent if specified. Returns (kept, report) -- the report
-    # travels to the UI so filtering shows its work.
-    filter_report = ""
+    # Stage 1: fit against the goal of THIS search. Deterministic, always on.
+    kept, dropped, filter_report, icp_summary = icp_rank(businesses, goal=goal_obj)
+    # learns from rejects as well as fits, kept separate per goal
+    icp_learn(kept + dropped, goal=goal_obj)
+
+    # Stage 2: the user's own phrasing, when they gave one, narrows it further.
     if category:
         from agents.category_filter import filter_by_category
-        businesses, filter_report = filter_by_category(businesses, category)
-    no_site = filter_no_website(businesses)
-    with_site = [b for b in businesses if b.get("website")]
+        kept, intent_report = filter_by_category(kept, category, goal=goal_obj)
+        filter_report = f"{filter_report} {intent_report}"
 
     # Verify no-site businesses via web search to catch OSM-missing websites
-    verified_businesses = verify_no_site_businesses(businesses, location)
+    verified_businesses = verify_no_site_businesses(kept, location)
     verified_no_site = filter_no_website(verified_businesses)
     verified_with_site = [b for b in verified_businesses if b.get("website")]
 
     # Learn from this search
     learn_from_search(verified_businesses, location)
+    _remember_fit(kept, goal_obj)
     try:
         from agents.event_bus import emit
         emit("packet", from_="search", to="brain", label=location[:26])
         emit("bot", bot="scout", status="done",
              task=f"Found {len(verified_no_site)} no-site businesses in {location}",
              source="workflow")
+        emit("bot", bot="analyst", status="done",
+             task=f"ICP [{goal_obj['label']}]: {icp_summary['fits']} direct fits, "
+                  f"{icp_summary['plausible']} plausible, "
+                  f"{icp_summary['dropped']} ruled out",
+             source="workflow")
+        emit("packet", from_="analyst", to="brain", label=f"ICP: {goal_obj['label']}"[:26])
     except Exception:
         pass
 
@@ -122,7 +162,40 @@ def search_businesses_workflow(location: str, radius: int,
         "no_site": verified_no_site,
         "with_site": verified_with_site,
         "filter_report": filter_report,
+        "icp": icp_summary,
+        "dropped": dropped,
+        "goal": goal_obj["key"],
+        "goal_label": goal_obj["label"],
+        "source": maps_source or "osm",
     }
+
+
+def _remember_fit(businesses: list[dict], goal: dict = None) -> None:
+    """Store each kept business's fit verdict in the brain. Never raises."""
+    try:
+        from agents.brain import get_brain
+        brain = get_brain()
+        goal_label = (goal or {}).get("label", "")
+        for biz in businesses:
+            verdict = biz.get("icp") or {}
+            if verdict.get("fit") == "unlikely":
+                continue
+            brain.learn_business(
+                biz.get("name", "?"),
+                category=biz.get("category", ""),
+                facts={
+                    "fit": verdict.get("fit"),
+                    "fit_score": verdict.get("fit_score"),
+                    "institution_type": verdict.get("institution_type"),
+                    "why_fit": "; ".join(verdict.get("fit_reasons", [])[:3]),
+                    "goal": goal_label or verdict.get("goal", ""),
+                    **({"email": biz["email"]} if biz.get("email") else {}),
+                    **({"phone": biz["phone"]} if biz.get("phone") else {}),
+                },
+                source="search",
+            )
+    except Exception:
+        pass
 
 
 def scrape_businesses_workflow(businesses: list[dict]) -> list[dict]:
@@ -159,6 +232,12 @@ def enrich_workflow(businesses: list[dict], hunter_key: str) -> dict:
                 print(f"  [ENRICH] contact finder failed: {e}")
 
         contact_found = (contact_result or {}).get("found", 0)
+
+        # Decision-maker pass (CEO/founder/owner), same contract as the
+        # Hunter branch above: separate the person from the inbox, promote
+        # only when no business address exists at all.
+        exec_result = _run_exec_finder(businesses)
+
         return {
             "enriched": businesses,
             "enriched_count": maps["email_found"] + contact_found,
@@ -166,6 +245,7 @@ def enrich_workflow(businesses: list[dict], hunter_key: str) -> dict:
             "method": "maps_fallback",
             "phone_found": maps["phone_found"],
             "contact_finder": contact_result,
+            "exec_finder": exec_result,
             "maps_results": maps,
             "results": [
                 {
@@ -205,7 +285,23 @@ def enrich_workflow(businesses: list[dict], hunter_key: str) -> dict:
         else:
             results.append({"name": biz["name"], "email": None, "found": False})
 
-    return {"enriched": businesses, "enriched_count": enriched_count, "results": results}
+    # Decision-maker pass: whoever this business's buyer is (CEO/founder/
+    # owner) — separated from the generic inbox, promoted to contact only
+    # when no business address exists at all.
+    exec_result = _run_exec_finder(businesses)
+
+    return {"enriched": businesses, "enriched_count": enriched_count,
+            "exec_finder": exec_result, "results": results}
+
+
+def _run_exec_finder(businesses: list[dict]) -> dict:
+    """Decision-maker lookup. Never raises; free (no keys) is a no-op."""
+    try:
+        from agents.exec_finder import find_executives
+        return find_executives(businesses)
+    except Exception as e:
+        print(f"  [ENRICH] exec finder failed: {e}")
+        return {"searched": 0, "found": 0, "results": []}
 
 
 def select_businesses_workflow(businesses: list[dict], choice: str) -> list[dict]:
@@ -227,8 +323,9 @@ def select_businesses_workflow(businesses: list[dict], choice: str) -> list[dict
 
 
 def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
-                           research_data: list[dict] = None) -> dict:
-    """Draft emails, generate PDFs, and create websites for no-site businesses.
+                           research_data: list[dict] = None,
+                           goal: str = "") -> dict:
+    """Draft emails, generate PDFs, and (only if the goal sells them) websites.
 
     Args:
         businesses: List of business dicts to process.
@@ -236,9 +333,13 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
         research_data: Optional list of research dicts (from research_workflow).
             Each dict should have 'name', 'strengths', 'gaps', 'email_hook',
             'improvement_suggestion'. If provided, emails are personalized.
+        goal: What this outreach sells (agents/icp.py). Decides the pitch, the
+            PDF headline and whether the website leg runs at all.
 
     Returns {drafts, errors, ai_used}.
     """
+    from agents.icp import resolve_goal
+    goal_obj = resolve_goal(explicit=goal)
     from agents.business_research import format_research_for_email, get_research_for_business
     from agents.event_bus import emit
     drafts = []
@@ -301,6 +402,7 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
             "contact_name": contact_name,
             "email": email,
             "category": category,
+            "goal": goal_obj["key"],
             "learning_context": combined_ctx,
         }, context={"sender_name": sender_name})
 
@@ -309,15 +411,17 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
              task=str(biz["name"])[:60], source="workflow")
         pdf_path = ""
         try:
-            pdf_path = generate_proposal_pdf(biz, sender_name)
+            pdf_path = generate_proposal_pdf(biz, sender_name, goal=goal_obj)
         except Exception as e:
             errors.append({"name": biz["name"], "type": "pdf", "error": str(e)})
 
-        # Website — only for businesses without one
-        emit("packet", from_="strategist", to="builder",
-             label=str(biz["name"])[:26])
+        # Website — only when our profile says we deliver websites, and only for
+        # businesses that don't have one. A licensing product should not be
+        # building prospects a website they never asked for.
         website_path = ""
-        if not biz.get("website"):
+        if not biz.get("website") and delivers_websites(goal_obj):
+            emit("packet", from_="strategist", to="builder",
+                 label=str(biz["name"])[:26])
             try:
                 site_result = orch.run("ai_generate_website", {
                     "name": biz["name"],
@@ -693,7 +797,8 @@ def obsidian_sync_workflow(businesses: list[dict], session_id: str,
 
 def run_outreach_pipeline(location: str, radius: int, session_id: str,
                            project_name: str, sender_name: str,
-                           auto_select: str = "", category: str = "") -> dict:
+                           auto_select: str = "", category: str = "",
+                           goal: str = "") -> dict:
     """One-shot outreach pipeline. Runs the full workflow end-to-end.
     
     Returns a report dict with all results. The caller handles UI.
@@ -709,7 +814,7 @@ def run_outreach_pipeline(location: str, radius: int, session_id: str,
 
     # 1. SEARCH
     emit("step", phase="search", message=f"Hunting businesses in {location}...", done=False)
-    search = search_businesses_workflow(location, radius, category=category)
+    search = search_businesses_workflow(location, radius, category=category, goal=goal)
     if "error" in search:
         emit("step", phase="search", message=f"Search failed: {search['error']}", done=True, failed=True)
         report["errors"].append({"step": "search", "error": search["error"]})
@@ -722,6 +827,9 @@ def run_outreach_pipeline(location: str, radius: int, session_id: str,
         "no_site": len(search["no_site"]),
         "with_site": len(search["with_site"]),
         "filter_report": search.get("filter_report", ""),
+        "icp": search.get("icp", {}),
+        "goal": search.get("goal", ""),
+        "goal_label": search.get("goal_label", ""),
     }
 
     # 2. SCRAPE (Scrapling — get contact details from websites)
@@ -793,7 +901,8 @@ def run_outreach_pipeline(location: str, radius: int, session_id: str,
 
 def complete_outreach(selected: list[dict], session_id: str,
                       project_name: str, sender_name: str,
-                      research_data: list[dict] = None) -> dict:
+                      research_data: list[dict] = None,
+                      goal: str = "") -> dict:
     """Complete the outreach: draft, PDF, website, Obsidian sync.
 
     Called after user selects businesses. Returns full results.
@@ -805,8 +914,9 @@ def complete_outreach(selected: list[dict], session_id: str,
         "drafts": [], "errors": [], "sync": {},
     }
 
-    # Draft emails + PDFs + websites
-    draft_result = draft_and_pdf_workflow(selected, sender_name, research_data)
+    # Draft emails + PDFs + websites, pitched for this goal
+    draft_result = draft_and_pdf_workflow(selected, sender_name, research_data,
+                                          goal=goal)
     result["drafts"] = draft_result["drafts"]
     result["errors"] = draft_result["errors"]
     result["ai_used"] = draft_result.get("ai_used", 0)

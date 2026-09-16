@@ -3,6 +3,7 @@
 The brain is a directory of JSON files that the AI builds up over time:
   brain/
     profile.json          -- what we sell, who we target, our story
+    icp.json              -- who actually turned out to be a fit, signal by signal
     industries/           -- one file per industry we've encountered
       education.json      -- pain points, hooks, what worked, what failed
       healthcare.json
@@ -132,6 +133,156 @@ class Brain:
                 out.append(rec)
         out.sort(key=lambda r: r.get("updated_at", ""), reverse=True)
         return out
+
+    # ── ICP (who our kind of customer is, learned from every search) ──
+
+    def _icp_path(self) -> Path:
+        return BRAIN_DIR / "icp.json"
+
+    def get_icp(self) -> dict:
+        """Everything learned about which businesses are actually our customers."""
+        return self._migrate_icp(self._read(self._icp_path()))
+
+    def _migrate_icp(self, data: dict) -> dict:
+        """Fold pre-goal learning into the per-goal shape, once.
+
+        Before goals existed there was a single product, so the old top-level
+        counters are the cad_licensing goal's history. Throwing them away would
+        silently discard everything learned so far.
+        """
+        if not data:
+            return data
+        legacy = bool(data.get("signal_stats") or data.get("type_stats"))
+        by_goal = data.get("by_goal") or {}
+        if not legacy or "cad_licensing" in by_goal:
+            return data
+        product = data.get("product", "")
+        data["by_goal"] = {**by_goal, "cad_licensing": {
+            "label": "CAD / drafting software licences",
+            "product": product,
+            "signal_stats": data.get("signal_stats", {}),
+            "type_stats": data.get("type_stats", {}),
+            "rejected_names": data.get("rejected_names", {}),
+            "total_judged": data.get("total_judged", 0),
+            "total_fits": data.get("total_fits", 0),
+            "total_rejects": data.get("total_rejects", 0),
+            "updated_at": data.get("updated_at", ""),
+        }}
+        runs = data.setdefault("goals_seen", {})
+        runs.setdefault("cad_licensing", {
+            "runs": 1, "label": "CAD / drafting software licences",
+            "product": product, "last_used": data.get("updated_at", "")})
+        # The legacy keys are now represented per goal; leaving them would read
+        # as a third, goal-less bucket of stats.
+        for stale in ("signal_stats", "type_stats", "rejected_names",
+                      "total_judged", "total_fits", "total_rejects", "product"):
+            data.pop(stale, None)
+        self._write(self._icp_path(), data)
+        return data
+
+    def learn_icp_feedback(self, judged: list[dict], goal_key: str = "",
+                           goal_label: str = "", product: str = "") -> dict:
+        """Accumulate which signals actually turned out to be a fit FOR ONE GOAL.
+
+        Expects businesses carrying a verdict in ``biz['icp']``. Everything is
+        counted per goal: the same signal means different things when we are
+        selling licences than when we are selling websites, so blending the two
+        would make the learning worse than none.
+        """
+        goal_key = goal_key or "custom"
+        data = self.get_icp()
+        by_goal: dict = data.setdefault("by_goal", {})
+        g = by_goal.setdefault(goal_key, {"signal_stats": {}, "type_stats": {},
+                                           "rejected_names": {}})
+        if goal_label:
+            g["label"] = goal_label
+        if product:
+            g["product"] = product
+        g.setdefault("signal_stats", {})
+        g.setdefault("type_stats", {})
+        rejected: dict = g.setdefault("rejected_names", {})
+
+        fits = rejects = 0
+        for biz in judged:
+            verdict = biz.get("icp") or {}
+            if not verdict:
+                continue
+            is_fit = verdict.get("fit") in ("fits", "plausible")
+            fits += 1 if is_fit else 0
+            rejects += 0 if is_fit else 1
+            bucket = "fits" if is_fit else "unlikely"
+            for sig in verdict.get("matched_signals") or []:
+                st = g["signal_stats"].setdefault(sig, {"fits": 0, "unlikely": 0})
+                st[bucket] = st.get(bucket, 0) + 1
+            label = verdict.get("institution_type")
+            if label and is_fit:
+                ts = g["type_stats"].setdefault(label, {"seen": 0})
+                ts["seen"] += 1
+            # Remember who we already ruled out for this goal, so the same piles
+            # are not re-litigated on every future search of the same area.
+            if not is_fit and verdict.get("disqualifiers"):
+                rejected[biz.get("name", "?")] = verdict["disqualifiers"][0]
+        for stale in list(rejected)[:-200]:
+            del rejected[stale]
+
+        g["total_judged"] = g.get("total_judged", 0) + len(judged)
+        g["total_fits"] = g.get("total_fits", 0) + fits
+        g["total_rejects"] = g.get("total_rejects", 0) + rejects
+        g["updated_at"] = datetime.now().isoformat()
+
+        # Which goals we have run, newest last -- so the system remembers that
+        # targeting moves around instead of assuming one product.
+        seen = data.setdefault("goals_seen", {})
+        entry = seen.setdefault(goal_key, {"runs": 0})
+        entry["runs"] = entry.get("runs", 0) + 1
+        entry["label"] = goal_label or entry.get("label", goal_key)
+        entry["product"] = product or entry.get("product", "")
+        entry["last_used"] = datetime.now().isoformat()
+        data["updated_at"] = datetime.now().isoformat()
+        self._write(self._icp_path(), data)
+        return data
+
+    def get_icp_context(self, goal_key: str = "") -> str:
+        """What we have learned about who fits, for one goal (or all goals)."""
+        data = self.get_icp()
+        if not data:
+            return ""
+        by_goal = data.get("by_goal") or {}
+        if not by_goal:
+            return ""
+
+        parts = []
+        keys = [goal_key] if goal_key in by_goal else list(by_goal)
+        for key in keys:
+            g = by_goal.get(key) or {}
+            label = g.get("label") or key
+            head = f"Target learning for {g.get('product') or label}:"
+            lines = [head]
+            judged = g.get("total_judged", 0)
+            if judged:
+                fits = g.get("total_fits", 0)
+                lines.append(f"  {fits}/{judged} businesses judged have been a fit "
+                             f"({round(100 * fits / judged)}%)")
+            types = sorted((g.get("type_stats") or {}).items(),
+                           key=lambda kv: -kv[1].get("seen", 0))[:6]
+            if types:
+                lines.append("  Fits seen by type: " +
+                             ", ".join(f"{k} ({v.get('seen', 0)})" for k, v in types))
+            # Signals that keep producing rejects are worth naming explicitly.
+            noise = []
+            for sig, st in (g.get("signal_stats") or {}).items():
+                seen_n = st.get("fits", 0) + st.get("unlikely", 0)
+                if seen_n >= 3 and st.get("fits", 0) == 0:
+                    noise.append(f"{sig} ({st.get('unlikely', 0)}x)")
+            if noise:
+                lines.append("  Signals that never fitted: " + ", ".join(noise[:6]))
+            parts.append("\n".join(lines))
+
+        seen = data.get("goals_seen") or {}
+        if len(seen) > 1:
+            parts.append("Goals we have searched for: " + ", ".join(
+                f"{v.get('label', k)} ({v.get('runs', 0)})" for k, v in seen.items()))
+        return "\n".join(parts)
 
     def _read(self, path: Path) -> dict:
         if path.exists():
@@ -361,6 +512,19 @@ class Brain:
         profile_ctx = self.get_profile_context()
         if profile_ctx:
             parts.append(f"BUSINESS PROFILE:\n{profile_ctx}")
+
+        # Who actually buys from us: the target profile plus what we've learned
+        # from judging every business we've ever searched.
+        try:
+            from agents.icp import goals_overview
+            goals_ctx = goals_overview()
+            if goals_ctx:
+                parts.append(f"\n{goals_ctx}")
+        except Exception:
+            pass
+        icp_learned = self.get_icp_context()
+        if icp_learned:
+            parts.append(f"\n{icp_learned}")
 
         # Industries
         industries = self.list_industries()

@@ -86,7 +86,7 @@ _TOOLS = [
         "function_declarations": [
             {
                 "name": "search_businesses",
-                "description": "Search for businesses in a location using OpenStreetMap. Returns businesses that may not have websites.",
+                "description": "Search a location for businesses and rank them against what the user is selling on this search. Returns the prospects that fit.",
                 "parameters": {
                     "type": "object",
                     "properties": {
@@ -101,6 +101,10 @@ _TOOLS = [
                         "radius": {
                             "type": "integer",
                             "description": "Search radius in meters. Default 2000.",
+                        },
+                        "goal": {
+                            "type": "string",
+                            "description": "What the user is SELLING on this search, in a few words - e.g. 'AutoCAD licences', 'websites', 'web design', 'laptops'. Their goal changes between searches, so pass what they are selling right now. Omit only when they never say.",
                         },
                     },
                     "required": ["location"],
@@ -413,6 +417,10 @@ def _parse_with_gemini(user_input: str, context: list[dict] = None,
                 break
             except Exception as e:
                 msg = str(e)
+                # 429 quota hits carry a retryDelay; 5xx are the transient
+                # blips Gemini throws under load -- both are retryable, and
+                # letting a 503 raise straight through turns into the
+                # misleading "I'm not sure what you mean" card.
                 if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
                     import re as _re
                     wait = 0
@@ -422,6 +430,12 @@ def _parse_with_gemini(user_input: str, context: list[dict] = None,
                     wait = min(wait or (6 * (attempt + 1)), 25)
                     if attempt < 2:
                         print(f"  [AI] Quota hit — waiting {wait}s before retry")
+                        time.sleep(wait)
+                        continue
+                elif any(code in msg for code in ("503", "500", "UNAVAILABLE", "DEADLINE_EXCEEDED")):
+                    if attempt < 2:
+                        wait = 1.5 * (attempt + 1)
+                        print(f"  [AI] Server blip ({msg[:60]}) — retrying in {wait:.0f}s")
                         time.sleep(wait)
                         continue
                 raise
@@ -541,6 +555,9 @@ def _build_system_prompt(business_profile: dict = None,
         "- For complex requests like 'find schools and draft emails', use "
         "search_businesses first, then draft_emails in the same response.",
         "- If the user mentions a location, extract it for search_businesses.",
+        "- The user's goal changes between searches: websites today, AutoCAD licences tomorrow. "
+        "Pass what they are selling now as `goal`. If they never say, leave it out and the "
+        "system falls back to their saved product.",
         "- If the user says 'draft' or 'write emails', use draft_emails.",
         "- If the user says 'send', use send_emails.",
         "- If the user says 'status' or 'dashboard', use the appropriate tool.",
@@ -635,9 +652,14 @@ def _handle_function_call(function_call, user_input: str) -> Action:
 def _build_search_response(args: dict) -> str:
     location = args.get("location", "that area")
     category = args.get("category", "")
+    goal = args.get("goal", "")
     if category:
-        return f"Searching for: {category} in {location}..."
-    return f"Searching for businesses in {location}..."
+        line = f"Searching for: {category} in {location}..."
+    else:
+        line = f"Searching for businesses in {location}..."
+    if goal:
+        line += f"\nSelling: {goal} - ranking these against that."
+    return line
 
 
 def _ask_user_action(args: dict) -> Action:

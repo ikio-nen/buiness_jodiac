@@ -23,6 +23,10 @@ if _root not in sys.path:
 # Per-WebSocket interactive state: brainstorm conversations and email reviews
 _brainstorm_sessions = {}
 _review_states = {}
+# Strong refs to fire-and-forget dispatch tasks: the event loop keeps only
+# weak references, so an unreferenced long-running chain can be garbage
+# collected mid-run and silently vanish.
+_background_tasks = set()
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.staticfiles import StaticFiles
@@ -511,7 +515,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                 })
                             except Exception:
                                 pass
-                asyncio.create_task(_run_chain(list(actions), session))
+                _t = asyncio.create_task(_run_chain(list(actions), session))
+                _background_tasks.add(_t)
+                _t.add_done_callback(_background_tasks.discard)
 
     except WebSocketDisconnect:
         pass
@@ -619,10 +625,15 @@ def _shape_result(at: str, data: dict):
             "total": data.get("total", 0),
             "no_site_count": data.get("no_site", len(businesses)),
             "with_site_count": data.get("with_site", 0),
+            "icp": data.get("icp") or {},
+            "source": data.get("source", "osm"),
             "businesses": [
                 {"name": b.get("name", "?"),
                  "category": b.get("category", "?"),
                  "address": b.get("address", "?"),
+                 "fit": (b.get("icp") or {}).get("fit", ""),
+                 "fit_score": (b.get("icp") or {}).get("fit_score", 0),
+                 "institution_type": (b.get("icp") or {}).get("institution_type", ""),
                  "has_website": bool(b.get("website"))}
                 for b in businesses[:20]
             ],
@@ -635,7 +646,9 @@ def _shape_result(at: str, data: dict):
             "drafts": [
                 {"business": (d.get("business") or {}).get("name", "?"),
                  "subject": d.get("subject", "?"),
-                 "to": d.get("to", "")}
+                 "to": d.get("to", ""),
+                 "exec_name": (d.get("business") or {}).get("exec_name", ""),
+                 "exec_title": (d.get("business") or {}).get("exec_title", "")}
                 for d in drafts
             ],
         }

@@ -826,6 +826,47 @@ html[data-phase="night"]     #clockIcon { color: #8fa8d8; }
 .tag-red    { background: #f0d3ce; color: var(--red-bad); }
 .tag-yellow { background: #f3e4b8; color: #8a6d1f; }
 
+/* ICP fit verdicts on the results card */
+.icp-bar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 2px 0 7px; padding-bottom: 7px; border-bottom: 1px dashed var(--line);
+}
+.icp-stat {
+  font-family: var(--pixel-font); font-size: 6px; padding: 3px 5px;
+  border-radius: 3px; border: 1px solid var(--line-warm);
+  background: var(--paper-deep); color: var(--ink-soft);
+}
+/* Which goal this batch was judged against - it changes between searches. */
+.icp-goal {
+  font-family: var(--pixel-font); font-size: 6px; padding: 3px 6px;
+  border-radius: 3px; border: 1px solid var(--wood-deep);
+  background: var(--accent-soft); color: var(--wood-deep);
+}
+.icp-stat b { font-size: 8px; margin-right: 2px; }
+.icp-fits     { background: #dcecc9; border-color: var(--green-ok); color: var(--green-ok); }
+.icp-fits b   { color: var(--green-ok); }
+.icp-plausible     { background: #f6e7c1; border-color: var(--amber-warn); color: #8a6d1f; }
+.icp-plausible b   { color: #8a6d1f; }
+.icp-drop     { background: #f0d9d5; border-color: var(--red-bad); color: var(--red-bad); }
+.icp-drop b   { color: var(--red-bad); }
+.icp-for { margin-left: auto; font-size: 13px; color: var(--ink-soft); font-style: italic; }
+.icp-types { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 7px; }
+.icp-type {
+  font-size: 13px; color: var(--ink-soft); background: var(--paper-deep);
+  border: 1px solid var(--line); border-radius: 10px; padding: 1px 7px;
+}
+.icp-type b { color: var(--ink); }
+.fit-badge {
+  font-family: var(--pixel-font); font-size: 6px; padding: 2px 4px;
+  border-radius: 3px; border: 1px solid var(--ink);
+}
+.fit-fits      { background: #d9e8c8; color: var(--green-ok); }
+.fit-plausible { background: #f3e4b8; color: #8a6d1f; }
+.fit-unlikely  { background: #f0d3ce; color: var(--red-bad); }
+.fit-score { font-size: 12px; color: var(--ink-soft); margin-left: 3px; }
+.fit-type { font-size: 14px; color: var(--ink-soft); }
+.fit-unknown { color: var(--ink-soft); opacity: 0.65; font-style: italic; }
+
 /* progress + typing */
 .progress-bar { height: 6px; background: var(--paper-deep); border: 1px solid var(--line-warm); border-radius: 3px; margin-top: 6px; overflow: hidden; }
 .progress-fill { height: 100%; width: 40%; background: var(--accent); animation: progress-slide 1.2s ease-in-out infinite; }
@@ -1178,7 +1219,10 @@ html[data-phase="night"]     #clockIcon { color: #8fa8d8; }
 @media (max-width: 900px) {
   .app {
     grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(340px, 48vh) minmax(0, 1fr) auto;
+    /* The floor takes a fixed share here, so on a short window the command
+       panel was left ~214px for ~307px of children: the message list collapsed
+       to 20px and the chat was unreadable. Give the panel the room instead. */
+    grid-template-rows: auto minmax(130px, 20vh) minmax(0, 1fr) auto;
     grid-template-areas:
       "topbar" "floor" "cmd" "roster";
   }
@@ -1186,6 +1230,10 @@ html[data-phase="night"]     #clockIcon { color: #8fa8d8; }
   .station-enricher { left: 56%; }   /* clear of builder's right-anchored desk */
   .ops-feed { height: 60px; font-size: 14px; }  /* stop the feed swallowing the short floor */
   .bot-tag { display: none; }
+  /* Buy the chat list room from the decorative chrome. No fixed min-height on
+     .messages: it is flex:1 with min-height:0 so it yields before the composer
+     does, and a floor here would clip the send button on a very short window. */
+  .cmd-stats { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

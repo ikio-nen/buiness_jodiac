@@ -29,13 +29,18 @@ STRICT_EDUCATION_TAGS = (
 )
 
 
-def filter_by_category(businesses: list[dict], category: str) -> tuple[list[dict], str]:
+def filter_by_category(businesses: list[dict], category: str,
+                       goal: dict = None) -> tuple[list[dict], str]:
     """Filter businesses to match the user's stated intent.
 
     Args:
         businesses: List of business dicts with 'name' and 'category' keys.
         category: The user's own phrasing, e.g.
             "educational centers that teach autocad and will be suitable customers".
+        goal: The active search goal (agents/icp.py). Its ``never_tags`` are the
+            kill-list, so "never a fit" has one owner. Without it we fall back to
+            the education-era list, which is wrong for e.g. a website goal where
+            a clinic or a cafe is exactly the customer.
 
     Returns:
         (kept_businesses, report) where report is a human-readable one-liner
@@ -44,11 +49,13 @@ def filter_by_category(businesses: list[dict], category: str) -> tuple[list[dict
     if not category:
         return businesses, "No category filter applied."
 
+    kill_tags = tuple(goal.get("never_tags") or ()) if goal else TAG_KILL_LIST
+
     # Stage 1: tag kill-list -- never argue with these.
     kept, dropped = [], {}
     for b in businesses:
         tag = (b.get("category") or "").lower()
-        killer = next((t for t in TAG_KILL_LIST if t in tag), None)
+        killer = next((t for t in kill_tags if t in tag), None)
         if killer:
             dropped[killer] = dropped.get(killer, 0) + 1
         else:
@@ -67,7 +74,15 @@ def filter_by_category(businesses: list[dict], category: str) -> tuple[list[dict
                   f"AI dropped {ai_drops}.")
         return kept, report
 
-    # Stage 3: fail closed -- AI unavailable/error means strict tags, not garbage.
+    # Stage 3: fail closed. For a goal-scoped search the ICP has already judged
+    # fit, so strict tag matching against an unknown intent would only throw away
+    # good prospects -- keep them. Otherwise fall back to strict education tags.
+    if goal is not None:
+        report = (f"Filtered {len(businesses)} -> {len(kept)} by goal tags "
+                  f"(AI unavailable): hard tags dropped "
+                  f"{sum(dropped.values())} ({_fmt_drops(dropped)}).")
+        return kept, report
+
     strict = [b for b in kept if _is_strict_tag_match(b, category)]
     report = (f"Filtered {len(businesses)} -> {len(strict)} by strict tags "
               f"(AI unavailable): hard tags dropped {sum(dropped.values())} ({_fmt_drops(dropped)}).")
@@ -118,8 +133,13 @@ Return JSON: {{"fits": [numbers], "plausible": [numbers], "unlikely": [numbers]}
                 return None
 
             def collect(key: str) -> list[int]:
+                # Accept floats too: a model that answers 4.0 used to have the
+                # index silently dropped, which failed the whole chunk closed.
                 vals = result.get(key, [])
-                return [v for v in vals if isinstance(v, int)] if isinstance(vals, list) else []
+                if not isinstance(vals, list):
+                    return []
+                return [int(v) for v in vals
+                        if isinstance(v, (int, float)) and not isinstance(v, bool)]
 
             fits = collect("fits")
             plausible = collect("plausible")
@@ -133,7 +153,18 @@ Return JSON: {{"fits": [numbers], "plausible": [numbers], "unlikely": [numbers]}
             for idx in fits + plausible:
                 kept.append(chunk[idx - 1])
             for idx in unlikely:
-                tag = (chunk[idx - 1].get("category") or "unknown").lower()
+                biz = chunk[idx - 1]
+                # The goal verdict is the authority on "is this a customer":
+                # a business the ICP scored fits or plausible may not be
+                # dropped by this pass. (The ICP is deterministic and knows
+                # what we're selling; re-judging borderline prospects here
+                # with a fuzzy rubric made the same search keep 5 prospects
+                # on one run and 0 on the next.) Businesses with no ICP
+                # verdict are still this pass's to judge.
+                if (biz.get("icp") or {}).get("fit") in ("fits", "plausible"):
+                    kept.append(biz)
+                    continue
+                tag = (biz.get("category") or "unknown").lower()
                 dropped[tag] = dropped.get(tag, 0) + 1
 
         return kept, dropped
@@ -143,7 +174,8 @@ Return JSON: {{"fits": [numbers], "plausible": [numbers], "unlikely": [numbers]}
 
 
 def _is_strict_tag_match(b: dict, category: str) -> bool:
-    """Strict tag check for fail-closed mode. Education intent -> education tags only."""
+    """Strict tag check for fail-closed mode with no goal. Education intent ->
+    education tags only."""
     tag = (b.get("category") or "").lower()
     cat = category.lower()
     if any(w in cat for w in ("school", "college", "education", "training", "academy",

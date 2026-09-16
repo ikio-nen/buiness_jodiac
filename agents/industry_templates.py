@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
-"""Industry templates - baseline knowledge for common business types.
+"""Industry templates - baseline knowledge for the verticals we sell to.
 
-The AI uses these as a starting point when it encounters a business type.
-As it interacts with real businesses, it builds on this foundation.
-Templates are stored in Obsidian as industry notes for cross-referencing.
+These are the verticals that survive the ICP (agents/icp.py): institutions
+with a classroom or computer lab. Anything without one is ruled out before
+an email is ever drafted, so it has no template here.
+
+Content is written for what we actually sell - official CAD/drafting software
+licences for labs - rather than a generic software pitch. As the AI interacts
+with real institutions it builds on this foundation through agents/learn.py.
+
+Templates are also mirrored into Obsidian as industry notes for cross-referencing.
 """
 
 import json
@@ -14,219 +20,146 @@ from agents.config import KB_DIR, OBSIDIAN_VAULT
 
 TEMPLATES_FILE = KB_DIR / "industry_templates.json"
 
+
 # ── Built-in templates ─────────────────────────────────────────────
 
 TEMPLATES = {
     "education": {
         "display_name": "Education",
-        "description": "Schools, colleges, training institutes, coaching centers",
+        "description": "Schools, colleges and institutes running computer or drafting labs",
         "pain_points": [
-            "Need online presence for admissions and parent communication",
-            "Parents want to check results, schedules, and updates online",
-            "Competing with schools that have modern websites",
-            "Limited budget for IT infrastructure",
-            "No online enrollment or fee payment system",
+            "Labs run on unlicensed or trial software that expires mid-session",
+            "Students install cracked copies and bring licensing risk onto campus",
+            "Per-seat licence cost blocks the lab from adding machines",
+            "No owner for licence renewal - labs break at the worst time",
         ],
         "what_they_need": [
-            "Website with admission forms and photo gallery",
-            "Parent portal for results and announcements",
-            "Online fee payment integration",
-            "Google My Business listing for local search",
+            "Genuine licensed seats sized to the lab",
+            "Education pricing for the whole institution",
+            "Installation, activation and renewal support",
+            "Licence documentation that stands up to an audit",
         ],
-        "outreach_approach": "Lead with parent communication pain point. Schools care about reputation and parent satisfaction.",
+        "outreach_approach": (
+            "Talk to the principal or lab in-charge. Ask how the computer lab is "
+            "licensed today, then quote the whole lab at education pricing - "
+            "compliance and per-seat cost, never a single copy."
+        ),
         "email_hooks": [
-            "Parents want to check results online - give them a portal",
-            "Your Google listing is the first thing new parents see",
-            "Competing schools have websites - here's what you're missing",
+            "Quick question about how {business_name}'s computer lab is licensed",
+            "Licensed seats for the whole lab at education pricing",
+            "Labs lose days when trial software expires mid-session",
         ],
-        "decision_maker": "Principal, Director, or IT Admin",
-        "typical_budget": "Low to medium - depends on school size",
-        "tags": ["school", "college", "training", "coaching", "education", "university"],
+        "decision_maker": "Principal, Director, Lab in-charge",
+        "typical_budget": "Institutional, approved per lab",
+        "tags": ["education", "school", "institute", "academy", "college", "training"],
     },
-    "food_and_drink": {
-        "display_name": "Food & Drink",
-        "description": "Restaurants, cafes, canteens, bakeries, food stalls",
+    "college": {
+        "display_name": "College",
+        "description": "Degree colleges with science, applied-science and drawing labs",
         "pain_points": [
-            "Losing orders to Zomato/Swiggy commission fees",
-            "No direct online ordering from their own website",
-            "Customers can't see menu or prices before visiting",
-            "No way to build a loyal customer base directly",
-            "Google reviews go unanswered - reputation suffers",
+            "Each department needs licensed seats, each with its own budget",
+            "Drawing and computer labs share machines across streams",
+            "Renewals lapse because nobody owns the licence register",
         ],
         "what_they_need": [
-            "Website with menu, photos, and online ordering",
-            "Google My Business optimization",
-            "Social media presence and review management",
-            "WhatsApp ordering integration",
+            "Department-wise quotation for procurement",
+            "Volume licensing across multiple labs",
+            "Licence certificates for compliance records",
         ],
-        "outreach_approach": "Lead with commission savings. 'Zomato takes 25-30% per order - what if customers ordered directly from you?'",
+        "outreach_approach": (
+            "Reach the head of the computer or drawing lab. Lead with a "
+            "department-wise quotation and the cost of licensing the entire lab "
+            "in one go."
+        ),
         "email_hooks": [
-            "Zomato takes 25-30% per order - keep that revenue",
-            "Customers search 'restaurants near me' - are you showing up?",
-            "Your menu deserves more than a photo on WhatsApp",
+            "Department-wise licensed seats for {business_name}'s labs",
+            "One quotation to license every lab machine",
+            "Compliance paperwork included with every licence",
         ],
-        "decision_maker": "Owner or Manager",
-        "typical_budget": "Low to medium",
-        "tags": ["restaurant", "cafe", "canteen", "bakery", "food", "dining"],
+        "decision_maker": "Principal, Head of Department, Lab in-charge",
+        "typical_budget": "Institutional, per department",
+        "tags": ["college", "campus", "degree", "mahavidyalaya", "university"],
     },
-    "healthcare": {
-        "display_name": "Healthcare",
-        "description": "Clinics, hospitals, pharmacies, nursing homes, diagnostic centers",
+    "training": {
+        "display_name": "Training centre",
+        "description": "Computer training centres running job-oriented courses",
         "pain_points": [
-            "Patients can't find you when they search online",
-            "No online appointment booking - phone lines jammed",
-            "Competitors with websites get more patient trust",
-            "Google reviews are unmanaged - one bad review hurts",
-            "Patients want to check doctor availability and fees",
+            "Adding a CAD or drafting course needs licensed software before students enrol",
+            "Every new batch needs another activated seat",
+            "Course fees cannot absorb full retail licence pricing",
+            "Machines get formatted between batches and lose activation",
         ],
         "what_they_need": [
-            "Website with doctor profiles and appointment booking",
-            "Google My Business with working phone and hours",
-            "Online reputation management",
-            "Patient testimonial showcase",
+            "Affordable per-seat licences that scale batch by batch",
+            "Fast re-activation when a machine is rebuilt",
+            "A CAD-ready lab so a new course can start earning quickly",
         ],
-        "outreach_approach": "Lead with patient acquisition. 'When someone searches [clinic type] near me, do you show up?'",
+        "outreach_approach": (
+            "Talk to the centre owner or course coordinator. Lead with cost per "
+            "student seat and how fast a new CAD batch can start."
+        ),
         "email_hooks": [
-            "Patients search online before choosing a doctor - are you visible?",
-            "Your Google reviews shape first impressions - manage them",
-            "Online appointment booking reduces no-shows by 30%",
+            "How fast could {business_name} start a CAD batch?",
+            "Per-seat licensing that scales with every new batch",
+            "Genuine licences, batch-friendly activation",
         ],
-        "decision_maker": "Doctor/Owner or Admin Manager",
-        "typical_budget": "Medium - healthcare values professionalism",
-        "tags": ["clinic", "hospital", "pharmacy", "nursing", "diagnostic", "medical"],
+        "decision_maker": "Centre owner, Director, Course coordinator",
+        "typical_budget": "Owner-approved, per batch",
+        "tags": ["training", "computer", "institute", "course", "coaching", "skill"],
     },
-    "shop": {
-        "display_name": "Retail & Shops",
-        "description": "Pharmacies, grocery stores, electronics shops, clothing stores",
+    "polytechnic": {
+        "display_name": "Polytechnic",
+        "description": "Polytechnics and diploma institutes teaching engineering trades",
         "pain_points": [
-            "Losing customers to Amazon and Flipkart",
-            "No online presence - only foot traffic",
-            "Customers check prices online then buy elsewhere",
-            "No way to showcase new arrivals or offers",
-            "No customer loyalty system",
+            "Drafting labs run AutoCAD across several semesters",
+            "Each trade (civil, mechanical, electrical) needs its own seats",
+            "Lab upgrades stall on per-seat licence cost",
         ],
         "what_they_need": [
-            "Website with product catalog and pricing",
-            "Google My Business with stock availability",
-            "WhatsApp catalog for quick browsing",
-            "Local SEO to beat online competitors",
+            "Trade-wise licensed seats for drafting labs",
+            "Volume pricing for all semesters at once",
+            "Support for lab installs and machine replacement",
         ],
-        "outreach_approach": "Lead with local advantage. 'Amazon can't match your same-day availability and personal service - but they can match your online visibility.'",
+        "outreach_approach": (
+            "Approach the head of the drafting or computer department. Lead with "
+            "trade-wise seats and a full-lab quotation."
+        ),
         "email_hooks": [
-            "Amazon can't match your service - but they can match your visibility",
-            "Customers check prices on their phone while standing in your shop",
-            "Your new arrivals deserve more than a poster on the door",
+            "Licensed drafting seats across all {business_name} trades",
+            "One quote for every semester's lab",
+            "Lab installation handled for you",
         ],
-        "decision_maker": "Owner",
-        "typical_budget": "Low to medium",
-        "tags": ["shop", "store", "pharmacy", "retail", "grocery", "electronics"],
+        "decision_maker": "Principal, Head of Department, Lab in-charge",
+        "typical_budget": "Institutional, per trade",
+        "tags": ["polytechnic", "polytecnic", "diploma", "engineering", "iti", "vocational"],
     },
-    "professional": {
-        "display_name": "Professional Services",
-        "description": "CA firms, law offices, consulting, coaching, tutoring",
+    "school": {
+        "display_name": "School",
+        "description": "Schools with senior-secondary vocational or computer streams",
         "pain_points": [
-            "No website means no credibility for new clients",
-            "Referrals dry up without online presence",
-            "Competitors with websites appear more established",
-            "No way to showcase expertise and past work",
-            "Clients want to see fees and services before calling",
+            "Vocational streams need software the school can prove is licensed",
+            "Shared lab machines are reimaged every session",
+            "Tight per-student budget across the whole lab",
         ],
         "what_they_need": [
-            "Professional website with service descriptions",
-            "Client testimonials and case studies",
-            "Contact forms and consultation booking",
-            "LinkedIn and Google presence optimization",
+            "Budget-friendly licensed seats for shared machines",
+            "Simple re-activation after lab reimaging",
+            "Documentation that satisfies school audits",
         ],
-        "outreach_approach": "Lead with credibility. 'Your first impression is your website - or lack of one.'",
+        "outreach_approach": (
+            "Reach the computer-lab in-charge or principal. Lead with audit-safe "
+            "licensing at a per-lab price."
+        ),
         "email_hooks": [
-            "Your first impression is your website - or lack of one",
-            "Clients Google you before hiring - what do they find?",
-            "Professional services need a professional online presence",
+            "Audit-safe licensed seats for {business_name}'s computer lab",
+            "Per-lab pricing for the whole classroom",
+            "Re-activation after reimaging, handled",
         ],
-        "decision_maker": "Partner or Principal",
-        "typical_budget": "Medium to high - values quality",
-        "tags": ["CA", "lawyer", "consultant", "tutor", "coach", "advisor"],
-    },
-    "home_services": {
-        "display_name": "Home Services",
-        "description": "Plumbers, electricians, painters, carpenters, AC repair",
-        "pain_points": [
-            "Only found through word of mouth - limited reach",
-            "No way for new customers to find them online",
-            "Competitors with Google listings get all the calls",
-            "No portfolio of past work to show potential clients",
-            "Can't compete with urban company / housejoy",
-        ],
-        "what_they_need": [
-            "Google My Business with photos of past work",
-            "Simple website with services and pricing",
-            "WhatsApp business for quick quotes",
-            "Local SEO for 'near me' searches",
-        ],
-        "outreach_approach": "Lead with lead generation. 'When someone's pipe bursts at 2am, they Google 'plumber near me' - are you there?'",
-        "email_hooks": [
-            "When a pipe bursts at 2am, they Google 'plumber near me'",
-            "Your past work speaks for itself - but only if people can see it",
-            "Urban Company takes 25% commission - get direct leads instead",
-        ],
-        "decision_maker": "Owner",
-        "typical_budget": "Low - but high value from new leads",
-        "tags": ["plumber", "electrician", "painter", "carpenter", "repair", "AC"],
-    },
-    "automotive": {
-        "display_name": "Automotive",
-        "description": "Car dealerships, mechanics, spare parts, driving schools",
-        "pain_points": [
-            "No online presence for local car buyers",
-            "Service customers don't know about maintenance packages",
-            "Competitors with websites dominate Google search",
-            "No way to showcase inventory online",
-            "Driving schools lose students to apps",
-        ],
-        "what_they_need": [
-            "Website with inventory/service catalog",
-            "Google My Business with service booking",
-            "Customer review management",
-            "WhatsApp for service reminders",
-        ],
-        "outreach_approach": "Lead with inventory visibility. 'Your car inventory deserves more than a photo on the showroom floor.'",
-        "email_hooks": [
-            "Car buyers check online before visiting the showroom",
-            "Service reminders via WhatsApp reduce missed appointments",
-            "Your showroom deserves a showroom on the web",
-        ],
-        "decision_maker": "Owner or Service Manager",
-        "typical_budget": "Medium",
-        "tags": ["car", "mechanic", "dealer", "automotive", "driving school"],
-    },
-    "logistics": {
-        "display_name": "Logistics & Transport",
-        "description": "Couriers, movers, trucking, warehousing, delivery services",
-        "pain_points": [
-            "No online tracking or booking system",
-            "Competitors with tech platforms win enterprise clients",
-            "Manual quote process is slow and error-prone",
-            "No visibility into delivery status for customers",
-            "Hard to differentiate from local competitors",
-        ],
-        "what_they_need": [
-            "Website with quote request and tracking",
-            "Google My Business for local discovery",
-            "Automated booking and confirmation system",
-            "Customer portal for shipment tracking",
-        ],
-        "outreach_approach": "Lead with operational efficiency. 'Manual quotes take 30 minutes - an online form takes 30 seconds.'",
-        "email_hooks": [
-            "Manual quotes take 30 minutes - an online form takes 30 seconds",
-            "Enterprise clients check your website before signing contracts",
-            "Real-time tracking reduces 'where is my order?' calls by 80%",
-        ],
-        "decision_maker": "Operations Manager or Owner",
-        "typical_budget": "Medium to high",
-        "tags": ["courier", "mover", "transport", "logistics", "delivery", "warehouse"],
+        "decision_maker": "Principal, Computer lab in-charge",
+        "typical_budget": "Institutional, per lab",
+        "tags": ["school", "vidyalaya", "high school", "secondary", "convent"],
     },
 }
-
 
 # ── Functions ──────────────────────────────────────────────────────
 

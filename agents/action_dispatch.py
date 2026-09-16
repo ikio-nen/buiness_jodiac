@@ -63,6 +63,7 @@ def _handle_search(params: dict, session, sender: str) -> dict:
     location = params.get("location", "")
     radius = params.get("radius", 2000)
     category = params.get("category", "")
+    goal = params.get("goal", "")
 
     if not location:
         return {"success": False, "message": "No location provided", "data": {},
@@ -72,15 +73,17 @@ def _handle_search(params: dict, session, sender: str) -> dict:
         location, radius,
         session.id if session.active else "",
         session.name if session.active else "",
-        sender, category=category,
+        sender, category=category, goal=goal,
     )
 
-    # Save to session
+    # Save to session, including which goal this batch was judged against so
+    # the draft leg pitches the same thing the search targeted.
     if session.active:
         session.save_data({
             "location": location, "radius": radius,
             "businesses": report.get("businesses", []),
             "no_website": report.get("no_site", []),
+            "goal": report.get("search", {}).get("goal", ""),
         }, "search_results.json")
 
     no_site = report.get("no_site", [])
@@ -142,6 +145,7 @@ def _handle_search(params: dict, session, sender: str) -> dict:
         "data": {
             "total": total, "no_site": len(no_site),
             "with_site": report.get("search", {}).get("with_site", 0),
+            "icp": report.get("search", {}).get("icp", {}),
             "businesses": no_site,
             "phones_csv": phones_csv,
             "proactive_notes": notes,
@@ -167,6 +171,8 @@ def _handle_draft(params: dict, session, sender: str) -> dict:
 
     selection = params.get("selection", "all")
     selected = select_businesses_workflow(businesses, selection)
+    # Same goal the search was judged against, so the pitch matches the target.
+    goal = params.get("goal") or data.get("goal", "")
 
     if not selected:
         return {"success": False, "message": "No businesses selected.",
@@ -178,7 +184,7 @@ def _handle_draft(params: dict, session, sender: str) -> dict:
         session.save_research(research_data)
 
     # Draft
-    result = draft_and_pdf_workflow(selected, sender, research_data)
+    result = draft_and_pdf_workflow(selected, sender, research_data, goal=goal)
     drafts = result.get("drafts", [])
 
     if session.active and drafts:
@@ -344,6 +350,13 @@ def _handle_enrich(params: dict, session) -> dict:
         if empty and len(empty) == len(businesses):
             msg += " — nothing found (Google did not surface contact info for any of them)"
         contact = result.get("contact_finder") or {}
+        execs = result.get("exec_finder") or {}
+        if execs.get("found"):
+            hits = ", ".join(
+                f"{r['name']} → {r['exec_name'] or r['exec_email']}"
+                + (f" ({r['exec_title']})" if r.get('exec_title') else "")
+                for r in execs["results"])[:400]
+            msg += f"\n  [exec] decision-makers found for {execs['found']}/{len(businesses)}: {hits}"
         if contact.get("searched"):
             if contact.get("found"):
                 hits = ", ".join(

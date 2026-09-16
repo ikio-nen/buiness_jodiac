@@ -208,15 +208,42 @@ function renderSearchResults(data) {
     addMessage('jarvis', 'No businesses found in that area.');
     return;
   }
+  const icp = data.icp || {};
   let html = `<div class="data-card"><div class="data-card-title">SEARCH RESULTS</div>`;
-  html += `<table class="data-table"><tr><th>#</th><th>Name</th><th>Category</th><th>Website</th></tr>`;
+
+  // ICP verdict bar — what the office decided about this batch, shown before
+  // the list so the filtering is visible instead of silent.
+  if (icp.total) {
+    html += `<div class="icp-bar">`;
+    if (icp.goal_label) html += `<span class="icp-goal">${esc(icp.goal_label)}</span>`;
+    html += `<span class="icp-stat icp-fits"><b>${icp.fits || 0}</b> direct fits</span>`;
+    html += `<span class="icp-stat icp-plausible"><b>${icp.plausible || 0}</b> plausible</span>`;
+    html += `<span class="icp-stat icp-drop"><b>${icp.dropped || 0}</b> ruled out</span>`;
+    if (icp.product) html += `<span class="icp-for">for ${esc(icp.product)}</span>`;
+    html += `</div>`;
+    if (icp.by_type && icp.by_type.length) {
+      html += `<div class="icp-types">` + icp.by_type.map(t =>
+        `<span class="icp-type">${esc(t.label)} <b>${t.count}</b></span>`).join('') + `</div>`;
+    }
+  }
+
+  html += `<table class="data-table"><tr><th>#</th><th>Name</th><th>Fit</th><th>Type</th><th>Site</th></tr>`;
   data.businesses.forEach((b, i) => {
+    const fit = b.fit || 'plausible';
+    const score = b.fit_score ? `<span class="fit-score">${b.fit_score}</span>` : '';
+    const badge = `<span class="fit-badge fit-${esc(fit)}">${fit === 'fits' ? 'FIT' : esc(fit).toUpperCase()}</span>${score}`;
+    const type = b.institution_type ? esc(b.institution_type)
+                                    : '<span class="fit-unknown">not classified</span>';
     const webTag = b.has_website ? '<span class="tag tag-green">YES</span>' : '<span class="tag tag-red">NO</span>';
-    html += `<tr><td>${i + 1}</td><td>${esc(b.name)}</td><td>${esc(b.category)}</td><td>${webTag}</td></tr>`;
+    html += `<tr><td>${i + 1}</td><td>${esc(b.name)}</td><td>${badge}</td><td class="fit-type">${type}</td><td>${webTag}</td></tr>`;
   });
   html += `</table><div style="margin-top:8px;font-size:14px;color:var(--ink-soft);">Found ${data.total} total: `;
   html += `<span class="tag tag-red">${data.no_site_count} without site</span> `;
-  html += `<span class="tag tag-green">${data.with_site_count} with site</span></div></div>`;
+  html += `<span class="tag tag-green">${data.with_site_count} with site</span></div>`;
+  if (data.source === 'gmaps') {
+    html += `<div style="margin-top:6px;font-size:14px;color:var(--amber-warn);">↳ sourced from Google Maps (Overpass had no data here)</div>`;
+  }
+  html += `</div>`;
   appendCard(html);
 }
 
@@ -225,7 +252,9 @@ function renderDraftResults(data) {
   html += `<table class="data-table"><tr><th>Business</th><th>Subject</th><th>Email</th></tr>`;
   data.drafts.forEach(d => {
     const emailTag = d.to ? `<span class="tag tag-green">${esc(d.to)}</span>` : '<span class="tag tag-yellow">No email</span>';
-    html += `<tr><td>${esc(d.business)}</td><td>${esc(d.subject)}</td><td>${emailTag}</td></tr>`;
+    const exec = d.exec_name
+      ? `<div style="font-size:13px;color:var(--amber-warn);">${esc(d.exec_name)}${d.exec_title ? ' — ' + esc(d.exec_title) : ''}</div>` : '';
+    html += `<tr><td>${esc(d.business)}${exec}</td><td>${esc(d.subject)}</td><td>${emailTag}</td></tr>`;
   });
   html += `</table>`;
   if (data.ai_used > 0) html += `<div style="margin-top:8px;font-size:14px;color:var(--green-ok);">AI personalized: ${data.ai_used}/${data.count}</div>`;

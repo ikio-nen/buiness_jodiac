@@ -1,169 +1,185 @@
 #!/usr/bin/env python3
 """Industry Learner — when JARVIS encounters a new business type, it researches it.
 
-Uses web search to learn:
-  - What the industry is about
-  - Common pain points
-  - What services they need
-  - How to approach them
-  - Average pricing in the industry
+Researches a vertical *for what we actually sell*: the product line and the
+ideal customer profile are read from the merged business profile and injected
+into the research prompt, so the pain points, hooks and budget that come back
+are about our product instead of a generic software pitch.
+
+Cached research is stamped with the product it was written for. Change the
+product and the stale entries are re-researched instead of silently feeding
+the old pitch into new emails.
 
 Stores insights in the knowledge base so future emails are better.
 """
 import json
-import re
-from pathlib import Path
 from datetime import datetime
 
 from agents.config import KB_DIR
 
 
-# ── Known industries (pre-researched) ───────────────────────────────
+def _product_line() -> str:
+    """What we sell, according to the merged profile."""
+    try:
+        from agents.icp import product_line
+        return product_line()
+    except Exception:
+        return "our product"
+
+
+def _icp_line() -> str:
+    try:
+        from agents.icp import target_profile
+        p = target_profile()
+        return (p.get("ideal_customer_profile") or p.get("target_customers") or "").strip()
+    except Exception:
+        return ""
+
+
+def _is_cad_product(product: str = "") -> bool:
+    """True when the product line looks like CAD/drafting software.
+
+    Takes the product of THIS search, not the saved one: the presets below are
+    written for the licence pitch, so a website search must not pick them up.
+    """
+    line = (product or _product_line()).lower()
+    return any(w in line for w in ("cad", "drafting", "draughting", "design software"))
+
+
+# ── Known verticals (pre-researched, for our CAD-licensing product) ───
+# Keyed by the OSM category the search returns, so a hit needs no API call.
+# Only verticals we would actually sell to are listed — anything the ICP rules
+# out never reaches an email, so it has no business being in this table.
 
 KNOWN_INDUSTRIES = {
-    "education": {
-        "description": "Schools, colleges, training institutes, coaching centers",
+    "college": {
+        "description": "Degree colleges running science, commerce and applied-science streams",
         "pain_points": [
-            "Need online presence for admissions",
-            "Parents research schools online before enrolling",
-            "Competing with nearby institutions for students",
-            "Need to showcase facilities and results",
+            "Computer and drafting labs need licensed CAD software per seat",
+            "Students install unlicensed copies at home and bring the risk onto campus",
+            "Lab expansion is blocked by per-seat licence cost",
+            "No single point of contact for licence renewals and support",
         ],
         "services_needed": [
-            "Website with admission forms",
-            "Online class scheduling",
-            "Student portal",
-            "Parent communication system",
+            "Official licensed CAD seats for lab machines",
+            "Bulk educational pricing per lab",
+            "Installation and activation support for lab admins",
+            "Renewal reminders so labs never run on expired licences",
         ],
-        "approach": "Focus on admissions growth and parent trust. Show how a website increases enrollment.",
-        "avg_budget": "500-2000 USD",
-        "decision_maker": "Principal, Director, Admin Head",
+        "approach": "Speak to the principal or the head of the computer/drawing lab. Lead with licence compliance and per-seat cost for a whole lab, not a single copy.",
+        "avg_budget": "Institutional licence budgets, usually approved per lab or per department",
+        "decision_maker": "Principal, Head of Department, Lab in-charge, IT coordinator",
     },
-    "food_and_drink": {
-        "description": "Restaurants, cafes, canteens, food stalls, bakeries",
+    "training": {
+        "description": "Computer training centres and institutes running job-oriented courses",
         "pain_points": [
-            "Need online ordering system",
-            "Competing with food delivery apps",
-            "Want to showcase menu and ambiance",
-            "Need reviews and ratings management",
+            "Adding a CAD/drafting course needs licensed software before students enrol",
+            "Every added batch needs another activated seat",
+            "Course fees cannot absorb full retail licence pricing",
+            "Students ask for CAD certificates and centre-branded licences",
         ],
         "services_needed": [
-            "Website with menu and ordering",
-            "Google Maps optimization",
-            "Social media integration",
-            "Online reservation system",
+            "Affordable per-seat licences that scale batch by batch",
+            "Quick activation between batches",
+            "Course-ready CAD setup for the lab",
+            "Support when a machine is replaced or formatted",
         ],
-        "approach": "Focus on online orders and foot traffic. Show how a website brings in more customers.",
-        "avg_budget": "300-1500 USD",
-        "decision_maker": "Owner, Manager",
+        "approach": "Talk to the centre owner or course coordinator. Lead with the cost per student seat and how quickly a new CAD batch can start earning.",
+        "decision_maker": "Centre owner, Director, Course coordinator",
     },
-    "shop": {
-        "description": "Retail stores, pharmacies, electronics shops, clothing stores",
+    "school": {
+        "description": "Schools with senior-secondary vocational or computer streams",
         "pain_points": [
-            "Losing customers to online stores",
-            "Need e-commerce capability",
-            "Want to showcase products catalog",
-            "Need Google visibility for local search",
+            "Vocational and computer streams need software the school can prove is licensed",
+            "Lab machines are shared and get reinstalled every session",
+            "Tight per-student budgets across the whole lab",
         ],
         "services_needed": [
-            "E-commerce website",
-            "Product catalog online",
-            "Google My Business optimization",
-            "WhatsApp ordering integration",
+            "Budget-friendly licensed seats for shared lab machines",
+            "Simple re-activation after lab reimaging",
+            "Documentation that satisfies school audits",
         ],
-        "approach": "Focus on competing with online retail. Show how a website brings local customers back.",
-        "avg_budget": "400-2000 USD",
-        "decision_maker": "Owner, Store Manager",
+        "approach": "Reach the computer-lab in-charge or principal. Lead with audit-safe licensing at a per-lab price.",
+        "decision_maker": "Principal, Computer lab in-charge, Vice-principal",
     },
-    "healthcare": {
-        "description": "Hospitals, clinics, nursing homes, pharmacies, diagnostic centers",
+    "university": {
+        "description": "Universities and autonomous institutes with engineering/design departments",
         "pain_points": [
-            "Patients need to find and book online",
-            "Need to showcase doctors and specialties",
-            "Competing with other healthcare providers",
-            "Need appointment scheduling",
+            "Multiple departments need licences, each with its own budget and timeline",
+            "Procurement is slow: software must go through formal quotation cycles",
+            "Compliance review demands proof of licensing before renewal",
         ],
         "services_needed": [
-            "Website with doctor profiles",
-            "Online appointment booking",
-            "Patient portal",
-            "Health blog for SEO",
+            "Department-wise licence quotations for procurement",
+            "Volume licensing across labs",
+            "Compliance paperwork and licence certificates",
         ],
-        "approach": "Focus on patient acquisition and trust. Show how a professional site builds credibility.",
-        "avg_budget": "800-3000 USD",
-        "decision_maker": "Director, Hospital Admin, Doctor",
+        "approach": "Enter through the department head or central IT/procurement. Lead with formal quotes, licence certificates and multi-department volume pricing.",
+        "decision_maker": "Registrar, Procurement officer, Head of Department, IT cell",
     },
-    "professional": {
-        "description": "Law firms, consulting, accounting, IT services, marketing agencies",
+    "educational_institution": {
+        "description": "Education institutions with computer or drafting labs",
         "pain_points": [
-            "Need to establish credibility online",
-            "Competing with larger firms",
-            "Want to showcase portfolio and case studies",
-            "Need lead generation",
+            "Labs run on unlicensed or trial software that expires mid-session",
+            "Per-seat cost blocks expanding the number of machines",
+            "Nobody owns licence renewals, so labs break at the worst time",
         ],
         "services_needed": [
-            "Professional portfolio website",
-            "Case studies and testimonials",
-            "Contact forms and lead capture",
-            "Blog for thought leadership",
+            "Licensed seats sized to the lab",
+            "Education pricing for the whole institution",
+            "One contact for installation, activation and renewal",
         ],
-        "approach": "Focus on credibility and lead generation. Show how a professional site wins clients.",
-        "avg_budget": "1000-5000 USD",
-        "decision_manager": "Partner, Owner, Managing Director",
-    },
-    "home_services": {
-        "description": "Plumbers, electricians, painters, cleaning services, repair shops",
-        "pain_points": [
-            "Need to be found when people search locally",
-            "Want online booking and scheduling",
-            "Competing with other local service providers",
-            "Need reviews and reputation management",
-        ],
-        "services_needed": [
-            "Website with service listings",
-            "Online booking system",
-            "Google Maps and local SEO",
-            "Review management",
-        ],
-        "approach": "Focus on being found locally. Show how a website brings more service calls.",
-        "avg_budget": "300-1200 USD",
-        "decision_maker": "Owner",
+        "approach": "Speak to whoever owns the lab budget. Lead with compliance plus the cost of licensing the entire lab in one go.",
+        "decision_maker": "Principal, Director, Lab in-charge",
     },
 }
 
 
 # ── Industry research via web ───────────────────────────────────────
 
-def research_industry_web(category: str) -> dict:
-    """Research a new business type using web search.
+def research_industry_web(category: str, product: str = "") -> dict | None:
+    """Research a vertical for the product of THIS search using AI.
 
-    Returns industry insights dict, or empty dict on failure.
+    Returns the insights dict, {"not_a_fit": True} when the model judged the
+    vertical out of scope, or None when research failed and should be retried
+    rather than cached.
     """
     try:
         from agents import ai_engine
         if not ai_engine.is_available():
-            return {}
+            return None
 
-        prompt = f"""Research the "{category}" business industry for B2B cold outreach purposes.
+        explicit = bool(product)
+        product = product or _product_line()
+        # The account ICP only applies when we fell back to the profile product.
+        icp = "" if explicit else _icp_line()
+        icp_line = f"\nTheir ideal customer: {icp}" if icp else ""
+
+        prompt = f"""We sell: {product}.{icp_line}
+
+Research the "{category}" vertical for B2B cold outreach selling {product}.
 
 Return ONLY a JSON object with these keys:
 {{
-  "description": "One-line description of this industry",
-  "pain_points": ["pain point 1", "pain point 2", "pain point 3"],
-  "services_needed": ["service 1", "service 2", "service 3"],
-  "approach": "One sentence: how to approach this industry for website/software sales",
-  "avg_budget": "typical budget range in USD",
+  "description": "One-line description of this vertical",
+  "pain_points": ["a real problem they have that {product} solves", "...", "..."],
+  "services_needed": ["what they would need from us", "...", "..."],
+  "approach": "One sentence: how to approach this vertical to sell {product}",
+  "avg_budget": "typical budget range they can commit",
   "decision_maker": "who makes the buying decision"
 }}
 
-Focus on: what problems do they have that a website/software can solve?
-Who do you talk to? What's their budget? What hooks work for cold email?"""
+Every pain point must relate to {product} specifically. Do not write generic
+software, CRM or website advice. If this vertical would not buy {product} at
+all, return {{"description": "", "not_a_fit": true}}."""
 
         result = ai_engine.generate_json(
             prompt=prompt,
-            system="You are a B2B sales research analyst. Be specific and practical.",
+            system=f"B2B sales researcher for a vendor of {product}. Be specific, practical and only about {product}.",
         )
 
+        if result and result.get("not_a_fit"):
+            return {"not_a_fit": True}
         if result and "description" in result:
             # Clean problematic characters for Windows encoding
             for key in result:
@@ -175,30 +191,27 @@ Who do you talk to? What's their budget? What hooks work for cold email?"""
     except Exception:
         pass
 
-    return {}
+    return None
 
 
-def get_or_research_industry(category: str) -> dict:
+def get_or_research_industry(category: str, product: str = "") -> dict:
     """Get industry data from knowledge base, or research it if new.
 
-    This is the main entry point — checks cache first, then web.
+    ``product`` is what this search is selling; it scopes both the research and
+    the cache stamp, so the same vertical researched for websites is not reused
+    as advice for selling licences.
     """
     # Normalize category
     cat_key = category.lower().strip().replace(" ", "_").replace("-", "_")
 
     # Empty/whitespace category — return generic fallback
     if not cat_key:
-        return {
-            "description": "A local business",
-            "pain_points": ["Need online presence", "Want more customers", "Competing locally"],
-            "services_needed": ["Professional website", "Google visibility", "Contact forms"],
-            "approach": "Approach with a focus on local visibility and customer acquisition.",
-            "avg_budget": "500-2000 USD",
-            "decision_maker": "Owner, Manager",
-        }
+        return _generic_insights(category, product)
 
-    # Check known industries first
-    if cat_key in KNOWN_INDUSTRIES:
+    product = product or _product_line()
+
+    # Check known verticals first — but only when they match what we sell.
+    if cat_key in KNOWN_INDUSTRIES and _is_cad_product(product):
         return KNOWN_INDUSTRIES[cat_key]
 
     # Check knowledge base cache
@@ -210,12 +223,25 @@ def get_or_research_industry(category: str) -> dict:
         except Exception:
             pass
 
-    if cat_key in cache:
-        return cache[cat_key]
+    cached = cache.get(cat_key)
+    # A cached entry written for a different product is worse than no entry.
+    if cached and cached.get("for_product") == product:
+        if cached.get("not_a_fit"):
+            return _generic_insights(category)
+        return cached
 
     # Research via web
     print(f"  [LEARN] New industry detected: {cat_key} - researching...")
-    insights = research_industry_web(cat_key)
+    insights = research_industry_web(cat_key, product=product)
+
+    # The model judged this vertical out of scope. Remember that, so the same
+    # non-fit question is not re-asked on every single run.
+    if insights and insights.get("not_a_fit"):
+        cache[cat_key] = {"not_a_fit": True, "for_product": product,
+                          "researched_at": datetime.now().isoformat()}
+        cache_file.write_text(json.dumps(cache, indent=2, ensure_ascii=True), encoding="utf-8")
+        print(f"  [LEARN] {cat_key} is not a fit for {product} - remembered")
+        return _generic_insights(category, product)
 
     if insights:
         # Clean any problematic characters before caching
@@ -228,30 +254,43 @@ def get_or_research_industry(category: str) -> dict:
                 return {k: _clean(v) for k, v in obj.items()}
             return obj
         insights = _clean(insights)
-        # Cache it
+        insights["for_product"] = product
+        insights["researched_at"] = datetime.now().isoformat()
         cache[cat_key] = insights
-        cache[cat_key]["researched_at"] = datetime.now().isoformat()
         cache_file.write_text(json.dumps(cache, indent=2, ensure_ascii=True), encoding="utf-8")
         print(f"  [LEARN] Researched and cached: {cat_key}")
         return insights
 
-    # Fallback: generic insights
+    # Nothing usable: the AI judged this vertical a non-fit, or it failed.
+    return _generic_insights(category, product)
+
+
+def _generic_insights(category: str, product: str = "") -> dict:
+    """Product-aware fallback when research is unavailable or inapplicable."""
+    product = product or _product_line()
     return {
-        "description": f"A {category} business",
-        "pain_points": ["Need online presence", "Want more customers", "Competing locally"],
-        "services_needed": ["Professional website", "Google visibility", "Contact forms"],
-        "approach": f"Approach {category} businesses with a focus on local visibility and customer acquisition.",
-        "avg_budget": "500-2000 USD",
-        "decision_maker": "Owner, Manager",
+        "description": f"A {category} institution" if category else "An institution",
+        "pain_points": [
+            f"Computer labs may be running unlicensed copies instead of real {product}",
+            "Per-seat cost makes equipping a whole lab expensive",
+        ],
+        "services_needed": [
+            f"Genuine {product} sized to their lab",
+            "Education pricing for the full lab",
+            "Installation and activation support",
+        ],
+        "approach": f"Ask how their computer lab is licensed today, then offer genuine {product} for the whole lab at education pricing.",
+        "avg_budget": "Institutional budget, approved per lab",
+        "decision_maker": "Principal, Director, Lab in-charge",
     }
 
 
-def build_industry_context(category: str) -> str:
+def build_industry_context(category: str, product: str = "") -> str:
     """Build a context string about an industry for email generation.
 
     Called by AI agents to make emails industry-aware.
     """
-    insights = get_or_research_industry(category)
+    insights = get_or_research_industry(category, product=product)
     if not insights:
         return ""
 
@@ -272,10 +311,7 @@ def build_industry_context(category: str) -> str:
     return "\n".join(parts)
 
 
-# ── Singleton cache ─────────────────────────────────────────────────
-
-_research_cache = {}
-
+# ── Cache access ────────────────────────────────────────────────────
 
 def get_industry_cache() -> dict:
     """Get the full industry research cache."""

@@ -6,9 +6,10 @@ Added: Web search verification to catch businesses with websites not tagged in O
 import json
 import re
 import subprocess
+import time
 import urllib.parse
 import urllib.request
-from .config import OVERPASS_URL
+from .config import OVERPASS_URLS
 
 CATEGORIES = [
     "shop", "amenity", "office", "craft",
@@ -48,29 +49,52 @@ def search_businesses(lat: float, lon: float, radius: int = 2000,
 
     query = '[out:json][timeout:25];(' + "".join(parts) + ");out center;"
 
-    # URL-encode and send with retry
+    # URL-encode and send, falling through primary -> mirrors.
     encoded_data = urllib.parse.quote(query)
 
+    # The whole lookup runs inside one time budget: a slow mirror used to hang
+    # the search for minutes, and an unhandled socket timeout on any endpoint
+    # killed it outright instead of moving on to the next one. Each endpoint
+    # gets its own slice of the budget so a hanging primary can never eat the
+    # time its mirrors would need -- failover must actually be reachable.
     data = None
-    for attempt in range(3):
-        result = subprocess.run(
-            ["curl", "-s", "-X", "POST", OVERPASS_URL,
-             "-H", "User-Agent: JARVIS-Outreach/1.0 (business contact finder)",
-             "-d", f"data={encoded_data}"],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            encoding="utf-8", errors="replace", timeout=60,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            try:
-                data = json.loads(result.stdout)
+    failure = ""
+    deadline = time.monotonic() + 100.0
+    per_endpoint = 100.0 / max(len(OVERPASS_URLS), 1)
+
+    for url in OVERPASS_URLS:  # primary first, then mirrors
+        url_deadline = time.monotonic() + per_endpoint
+        for attempt in range(2):
+            budget = min(deadline, url_deadline) - time.monotonic()
+            if budget <= 5:
                 break
-            except json.JSONDecodeError:
-                pass
-        import time
-        time.sleep(2 * (attempt + 1))  # backoff: 2s, 4s, 6s
+            try:
+                result = subprocess.run(
+                    ["curl", "-s", "-X", "POST", url,
+                     "-H", "User-Agent: JARVIS-Outreach/1.0 (business contact finder)",
+                     "-d", f"data={encoded_data}"],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    encoding="utf-8", errors="replace", timeout=min(40.0, budget),
+                )
+            except subprocess.TimeoutExpired:
+                failure = f"{url} timed out"
+            except OSError as e:
+                failure = f"{url} unavailable ({e})"
+            else:
+                if result.returncode == 0 and result.stdout.strip():
+                    try:
+                        data = json.loads(result.stdout)
+                        break
+                    except json.JSONDecodeError:
+                        failure = f"{url} returned invalid JSON"
+                else:
+                    failure = f"{url} returned nothing (curl {result.returncode})"
+            time.sleep(2 * (attempt + 1))  # backoff: 2s, 4s
+        if data is not None or time.monotonic() >= min(deadline, url_deadline):
+            break
 
     if data is None:
-        raise RuntimeError("Overpass API failed after 3 attempts")
+        raise RuntimeError(f"Overpass API failed on all {len(OVERPASS_URLS)} endpoints ({failure})")
     businesses = []
     seen_names = set()
 
@@ -123,7 +147,6 @@ def filter_no_website(businesses: list[dict]) -> list[dict]:
 
 def _find_website_wikidata(name: str, location: str = "") -> str:
     """Search Wikidata for a business and return its official website."""
-    import socket
     query = f"{name} {location}"
     url = f"https://www.wikidata.org/w/api.php?action=wbsearchentities&search={urllib.parse.quote(query)}&language=en&format=json&limit=5"
 
@@ -151,9 +174,17 @@ def _find_website_wikidata(name: str, location: str = "") -> str:
     return ""
 
 
-def _find_website_dns(name: str) -> str:
-    """Try common domain patterns for a business name."""
+def _find_website_dns(name: str, budget: float = 3.0) -> str:
+    """Try common domain patterns for a business name, within a time budget.
+
+    Guessed domains mostly do not exist, and each dead guess used to cost a
+    full socket timeout - minutes across a search. A hard budget keeps the
+    contact hunt fast. The process-wide default timeout is restored afterwards
+    instead of being left mutated for every other socket call in the process.
+    """
     import socket
+    import time
+
     slug = name.lower().replace(" ", "").replace("'", "").replace(".", "")
     slug_dash = name.lower().replace(" ", "-").replace("'", "").replace(".", "")
 
@@ -163,13 +194,20 @@ def _find_website_dns(name: str) -> str:
         f"{slug}.com", f"{slug}.in",
     ]
 
-    for domain in candidates:
-        try:
-            socket.setdefaulttimeout(2)
-            socket.gethostbyname(domain)
-            return f"https://{domain}"
-        except (socket.gaierror, socket.timeout):
-            continue
+    deadline = time.monotonic() + budget
+    previous = socket.getdefaulttimeout()
+    try:
+        socket.setdefaulttimeout(1.5)
+        for domain in candidates:
+            if time.monotonic() >= deadline:
+                break
+            try:
+                socket.gethostbyname(domain)
+                return f"https://{domain}"
+            except (socket.gaierror, socket.timeout, OSError):
+                continue
+    finally:
+        socket.setdefaulttimeout(previous)
     return ""
 
 
@@ -216,17 +254,21 @@ def verify_website(business_name: str, location: str = "") -> str:
 
 
 def verify_no_site_businesses(businesses: list[dict], location: str = "",
-                              max_verify: int = 15) -> list[dict]:
+                              max_verify: int = 15, budget: float = 25.0) -> list[dict]:
     """For businesses marked as no-site, verify via Wikidata + DNS.
-    
+
     Updates business['website'] if a real website is found.
-    Only checks up to max_verify businesses to keep it fast.
+    Bounded by both a count and a total time budget: one slow lookup must not
+    stall the whole search, and unresolved names are not worth waiting on.
     """
+    import time
+
     no_site = [b for b in businesses if not b.get("website")]
     checked = 0
+    deadline = time.monotonic() + budget
 
     for biz in no_site:
-        if checked >= max_verify:
+        if checked >= max_verify or time.monotonic() >= deadline:
             break
         name = biz.get("name", "")
         if not name:

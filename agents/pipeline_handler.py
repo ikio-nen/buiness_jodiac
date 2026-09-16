@@ -64,7 +64,8 @@ def run_quick_outreach(session):
 
     session_ref.save_data({"location": location, "radius": radius,
                           "businesses": report.get("businesses", []),
-                          "no_website": no_site, "selected": selected}, "search_results.json")
+                          "no_website": no_site, "selected": selected,
+                          "goal": search.get("goal", "")}, "search_results.json")
 
     # 3. Research + Draft
     step_header(3, 5, "Researching + Drafting Emails")
@@ -77,7 +78,8 @@ def run_quick_outreach(session):
 
     spinner(f"Generating {len(selected)} emails + PDFs", 1.0)
     result = complete_outreach(selected, session_ref.id, session_ref.name, sender,
-                               research_data=research_data)
+                               research_data=research_data,
+                               goal=search.get("goal", ""))
 
     drafts = result.get("drafts", [])
     errors = result.get("errors", [])
@@ -145,7 +147,8 @@ def run_full_pipeline(session):
     pause()
 
     sender = get_sender_name()
-    draft_result = draft_and_pdf_workflow(selected, sender)
+    draft_result = draft_and_pdf_workflow(selected, sender,
+                                         goal=result.get("goal", ""))
     success(f"Drafted {len(draft_result['drafts'])} emails + PDFs")
     pause()
 
@@ -185,7 +188,8 @@ def run_step_search(session):
         show_search_results(result["no_site"], result["with_site"])
         session.save_data({"location": location, "radius": radius,
                           "businesses": result["businesses"],
-                          "no_website": result["no_site"]}, "search_results.json")
+                          "no_website": result["no_site"],
+                          "goal": result.get("goal", "")}, "search_results.json")
 
 
 def run_step_enrich(session):
@@ -244,9 +248,12 @@ def run_step_draft(session):
     step_header(4, 5, "Research + Drafting Emails + PDFs")
     data = session.load_data("selected.json")
     selected = data.get("selected", [])
+    # Pitch the same thing the search targeted.
+    goal = data.get("goal", "")
     if not selected:
         data2 = session.load_data("search_results.json")
         selected = data2.get("no_website", [])
+        goal = goal or data2.get("goal", "")
     if not selected:
         warn("No businesses to draft for.")
         return True
@@ -258,7 +265,7 @@ def run_step_draft(session):
     if researched:
         status_badge("complete", f"Researched {len(researched)} businesses")
     spinner(f"Generating {len(selected)} emails + PDFs", 1.0)
-    result = draft_and_pdf_workflow(selected, sender, research_data)
+    result = draft_and_pdf_workflow(selected, sender, research_data, goal=goal)
     from agents.ui import show_draft_summary
     show_draft_summary(result)
     session.save_data({"drafts": [trim_draft_for_storage(d) for d in result["drafts"]]},

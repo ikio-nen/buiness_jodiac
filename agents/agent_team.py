@@ -144,10 +144,12 @@ AGENTS = {
             "outreach team. You work like a diligence analyst at a top firm: "
             "every claim you report is verified or explicitly labeled "
             "unverified. Your reports lead with the decision-relevant facts: "
-            "who the decision-maker is, their digital footprint (site, maps, "
-            "reviews, social), the single biggest gap we can solve, and the "
-            "best contact route. You quantify: review counts, ratings, "
-            "how stale their web presence is. You never pad -- no disclaimers, "
+            "who the decision-maker is, what the institution actually runs "
+            "(courses, labs, machines, public reviews), the single biggest gap "
+            "we can supply, and the best contact route. You quantify: review "
+            "counts, ratings, how many lab machines or students are affected. "
+            "Judge every prospect against what we sell, not against a generic "
+            "marketing checklist. You never pad -- no disclaimers, "
             "no 'as an AI', no restating the question. Structure: a one-line "
             "verdict, then tight bullets. If information is thin, you say "
             "exactly what's missing and name the source you'd check next. "
@@ -163,9 +165,9 @@ AGENTS = {
             "hundreds of cold emails and knows reply rates are earned in the "
             "first line. Your craft: find the ONE specific, checkable detail "
             "about the business that proves we did homework -- a recent review "
-            "complaint, a missing website, an outdated presence -- and turn it "
-            "into an opening hook about THEIR loss or opportunity, never our "
-            "product. You write like a concise human: concrete nouns, no "
+            "complaint, a lab that just expanded, software that is unlicensed "
+            "or expiring -- and turn it into an opening hook about THEIR loss "
+            "or opportunity, never our product. You write like a concise human: concrete nouns, no "
             'buzzwords (synergy, solutions, leverage), no feature lists. ' 
             "Every reply ends with a recommended next move: the hook itself, "
             "the follow-up angle, or the channel. When a hook angle was used "
@@ -529,7 +531,7 @@ MAX_TOOL_ROUNDS = 3
 
 
 def ask_agent(key: str, message: str, chat_history: list[dict] = None,
-              session=None) -> dict:
+              session=None, goal: str = "") -> dict:
     """Chat with one specialist agent. They remember, and they can act.
 
     Returns {agent, role, reply, used_web, learned, memory_count,
@@ -562,8 +564,20 @@ def ask_agent(key: str, message: str, chat_history: list[dict] = None,
     from agents.skills import skills_prompt, skill_names_for, mark_used
     skills_block = skills_prompt(key or "")
 
+    # What we sell and who buys it. Without this the specialists reason about
+    # a generic marketing problem and hand back hooks about the wrong product.
+    # ``goal`` is the goal of the batch being worked, so a website run does not
+    # get advice about lab software licences.
+    icp_block = ""
+    try:
+        from agents.icp import context as icp_context, resolve_goal
+        icp_block = icp_context(resolve_goal(explicit=goal))
+    except Exception:
+        pass
+
     system = (f"{spec['persona']}\n\n"
               + (skills_block + "\n\n" if skills_block else "")
+              + (f"WHAT WE SELL AND WHO BUYS IT:\n{icp_block}\n\n" if icp_block else "")
               + f"WHAT YOU ALREADY KNOW (your own memory):\n{memory_text}\n\n"
               f"Your tools: brain_query (search the team's shared brain -- per-"
               f"business intel, industry lessons, what outreach worked or failed; "
@@ -811,6 +825,10 @@ def team_act(businesses: list[dict], session=None, top_n: int = 3,
         out["errors"].append("no businesses to work")
         return out
 
+    # The batch carries the verdict it was judged with; work it for that goal.
+    batch_goal = ((targets[0].get("icp") or {}).get("goal")
+                  or (businesses[0].get("icp") or {}).get("goal", ""))
+
     from agents import ai_engine
     if not ai_engine.is_available():
         out["errors"].append("no Gemini key -- team cannot think right now")
@@ -836,8 +854,9 @@ def team_act(businesses: list[dict], session=None, top_n: int = 3,
                 f"Quickly research '{name}' (category: {biz.get('category', '?')}, "
                 f"area: {biz.get('address', '?')}). Check your memory first -- only "
                 f"use web_search if you need fresh facts. Reply with 2-3 concrete "
-                f"facts: reputation, rating, and their biggest online gap.",
-                session=session)
+                f"facts: reputation, rating, and the biggest gap we can supply "
+                f"here (for example how their computer lab is licensed today).",
+                session=session, goal=batch_goal)
             scout_reply = scout_out["reply"]
         except Exception as e:
             out["errors"].append(f"scout/{name}: {type(e).__name__}")
@@ -851,7 +870,7 @@ def team_act(businesses: list[dict], session=None, top_n: int = 3,
                 f"Write ONE opening hook line (max 25 words) for a cold email to "
                 f"'{name}'. Scout found: {scout_reply[:300]} Reply with only the "
                 f"hook -- no preamble, no quotes.",
-                session=session)
+                session=session, goal=batch_goal)
             hook = (strat_out["reply"].strip().splitlines() or [""])[0].strip('" ')
         except Exception as e:
             out["errors"].append(f"strategist/{name}: {type(e).__name__}")

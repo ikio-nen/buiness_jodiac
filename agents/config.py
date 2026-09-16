@@ -145,7 +145,41 @@ def get_business_context() -> str:
     return "\n".join(parts)
 
 # ── Overpass API ───────────────────────────────────────────────────────
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+# Tried in order; if the primary blocks or dies, the next mirror takes over.
+OVERPASS_URLS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.osm.ch/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+]
+
+# ── Google Maps discovery sources (optional, per-key) ─────────────────
+# OSM/Overpass is free but has real gaps for Indian institutions and small
+# firms. When one of these keys is set, a search that comes up empty on
+# Overpass fails over to Google Maps via that provider instead.
+
+def get_apify_token() -> str:
+    return load_config().get("apify_token", "")
+
+def set_apify_token(token: str):
+    cfg = load_config()
+    cfg["apify_token"] = token
+    save_config(cfg)
+
+def get_outscraper_key() -> str:
+    return load_config().get("outscraper_key", "")
+
+def set_outscraper_key(key: str):
+    cfg = load_config()
+    cfg["outscraper_key"] = key
+    save_config(cfg)
+
+def get_apollo_key() -> str:
+    return load_config().get("apollo_key", "")
+
+def set_apollo_key(key: str):
+    cfg = load_config()
+    cfg["apollo_key"] = key
+    save_config(cfg)
 
 # ── Session management ─────────────────────────────────────────────────
 def new_session_id() -> str:

@@ -250,8 +250,12 @@ def find_email_for_business(biz: dict, max_seconds: float = 45.0,
 
 
 def find_contacts(businesses: list[dict], sleep_between: float = 0.4,
-                  log=print) -> dict:
+                  log=print, budget: float = 120.0) -> dict:
     """Hunt emails for every business that lacks one. Mutates in place.
+
+    Runs inside a total time budget. Each business gets an equal share of what
+    is left, so a batch of misses is bounded instead of costing 45s x N, and no
+    single hunt can eat the whole batch.
 
     Returns {searched, found, empty, results:[{name, email, domain, source}]}.
     """
@@ -259,13 +263,20 @@ def find_contacts(businesses: list[dict], sleep_between: float = 0.4,
     empty: list[str] = []
     results: list[dict] = []
 
-    for biz in businesses:
-        if biz.get("email") or biz.get("maps_email"):
-            continue  # already has one; nothing to do
+    pending = [b for b in businesses
+               if not (b.get("email") or b.get("maps_email"))]
+    deadline = time.monotonic() + budget
+
+    for idx, biz in enumerate(pending):
+        remaining = deadline - time.monotonic()
+        if remaining <= 3:
+            log(f"  [CONTACT] budget spent, {len(pending) - idx} left unsearched")
+            break
+        share = max(6.0, min(45.0, remaining / max(1, len(pending) - idx)))
         searched += 1
         name = biz.get("name", "?")
         log(f"  [CONTACT] hunting email for {name}...")
-        hit = find_email_for_business(biz)
+        hit = find_email_for_business(biz, max_seconds=share)
         biz["contact_finder_email"] = hit["email"]
         biz["contact_finder_domain"] = hit["domain"]
         if hit["email"] and not biz.get("email"):
