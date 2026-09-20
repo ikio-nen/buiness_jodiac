@@ -175,3 +175,17 @@ def list_sessions() -> list[dict]:
                     data = json.loads(sf.read_text(encoding="utf-8"))
                     sessions.append({"id": d.name, **data})
     return sessions
+
+
+def get_active_session() -> "Session":
+    """The newest session on disk — the one the web UI and the CLI both use.
+
+    Lets a workflow read session-scoped state (attachments, profile, goal)
+    without threading a session object through every function signature.
+    Returns an unloaded Session when nothing exists yet.
+    """
+    s = Session()
+    sessions = list_sessions()
+    if sessions:
+        s.load(sessions[0]["id"], sessions[0])
+    return s

@@ -51,8 +51,41 @@ class ChatMemory:
         self._ensure()
         if conversation_id:
             self.conversation_id = conversation_id
+            self._started = True
         else:
-            self.conversation_id = self._create_conversation(session_id)
+            # Deferred: the conversations row is created on first write,
+            # not here. Read-only instances (history/GET/DELETE endpoints)
+            # must not litter the DB with empty "New conversation" rows.
+            self.conversation_id = None
+            self._started = False
+
+    def conversation_exists(self, conversation_id: int) -> bool:
+        """Whether a conversation id exists at all.
+
+        Public because a read endpoint has to be able to answer 404: without
+        it, a deleted conversation and an empty one are indistinguishable.
+        """
+        self._ensure()
+        row = self.conn.execute(
+            "SELECT 1 FROM conversations WHERE id = ?", (conversation_id,)
+        ).fetchone()
+        return row is not None
+
+    def _conversation_exists(self) -> bool:
+        if self.conversation_id is None:
+            return False
+        return self.conversation_exists(self.conversation_id)
+
+    def _start_if_needed(self):
+        """Create or heal the conversation row before a write.
+
+        Healing covers the delete-the-active-conversation flow: another
+        instance may have deleted this row while we still hold its id.
+        """
+        if self._started and self._conversation_exists():
+            return
+        self.conversation_id = self._create_conversation(self.session_id)
+        self._started = True
 
     def _ensure(self):
         """Re-open the connection if it was closed (e.g. close_memory() ran
@@ -75,6 +108,7 @@ class ChatMemory:
         return cur.lastrowid
 
     def set_title(self, title: str):
+        self._start_if_needed()
         self._ensure()
         self.conn.execute(
             "UPDATE conversations SET title = ? WHERE id = ?",
@@ -83,6 +117,7 @@ class ChatMemory:
         self.conn.commit()
 
     def add_message(self, role: str, content: str, action: dict = None):
+        self._start_if_needed()
         self._ensure()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         action_json = json.dumps(action, ensure_ascii=True) if action else ""
@@ -108,6 +143,8 @@ class ChatMemory:
 
     def get_context(self, n: int = 10) -> list[dict]:
         """Return last N messages for Gemini context."""
+        if self.conversation_id is None:
+            return []
         self._ensure()
         rows = self.conn.execute(
             "SELECT role, content, action_json, timestamp FROM messages "
@@ -160,6 +197,21 @@ class ChatMemory:
             }
             for r in rows
         ]
+
+    def delete_conversation(self, conversation_id: int) -> bool:
+        """Delete a conversation and all its messages. Returns True if it existed.
+
+        Safe against deleting the conversation this instance is writing to:
+        the caller handles starting a fresh one in that case (the WS layer
+        knows the live conversation id).
+        """
+        self._ensure()
+        cur = self.conn.execute(
+            "DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
+        gone = self.conn.execute(
+            "DELETE FROM conversations WHERE id = ?", (conversation_id,))
+        self.conn.commit()
+        return gone.rowcount > 0
 
     def close(self):
         if self.conn is not None:

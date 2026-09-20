@@ -1,5 +1,49 @@
 # Progress Log — JARVIS AI Outreach System
 
+## Session: Guided Campaign Mode (6-stage flow) — Build + Live Run
+**Date:** 2026-09-20 → 2026-09-21
+**Status:** Complete
+
+### Built
+1. `agents/campaign.py` — curation score (ICP → contactability → reviews), campaign_state.json state machine, initial/final PDF reports (fpdf, moss banner, latin-1 safe)
+2. `CAMPAIGN` ActionType + `start_campaign` Gemini tool — wired through chatbot.py, action_registry.py, action_dispatch.py (all three surfaces)
+3. `agents/web/campaign_ui.py` — blocking gates: checklist approval → 1-by-1 interview → drafting; ws.py claims campaign frames/answers BEFORE intent parsing (same rule as brainstorm/review)
+4. Office UI: `js/campaign.js` checklist card (tick, Approve All, cancel), interview banner frames (`interview: true`), `window.wsSend` bridge, CSS in style.css; assets bumped v26→v27→v28 across index.html + all sub-imports
+5. `/api/campaign` resume endpoint + client re-render on load — a saved gate survives reload
+6. `/api/report/initial` + `/api/report/final` FileResponse downloads
+7. `angles` param threaded through `draft_and_pdf_workflow`/`complete_outreach` — user angle leads the drafting context
+8. Send leg now always writes `campaign_final_*.pdf` + persists path to campaign_final.json
+
+### Bugs found & fixed during verification
+- `save_session_data` called with swapped args (filename 2nd) — caught by dry-run script on first run
+- Interview answers lost on completion (never promoted out of state['interview']) — caught by unit check; answers now copied to state['angles']
+- Dry-run harness false negative: didn't budget boot frames (agent_events_replay, queue_state) — rewrote to read-until-marker
+- Manually loaded session invisible to web layer (no session.json on disk) — registered it; resume_latest() then serves the right campaign
+
+### Verification
+- `py_compile` on all 9 touched Python files; `node --check` on app.js + all js/*.js
+- agents/test_final_audit.py: **20/20 PASS** (run twice, after each wave of changes)
+- Protocol-level WS dry run with injected fake shortlist: approve → initial PDF → interview [1/2] → pause → state intact
+- Live UI (preview at ?v=28): checklist renders, zero console errors, ops feed live
+
+### Live run: Bardhaman, West Bengal (education / AutoCAD licences)
+- Stage 1: Overpass 298 raw → 10 curated (2 earlier transient-failure runs diagnosed: radius/coverage, not code)
+- Stage 2: user approved top 8 (clinic + weak entry dropped) — gate honoured
+- Stage 3: campaign_initial_20260921_004710.pdf
+- Stage 4: interview — user skipped all 8 (research decides)
+- Stage 5: 8 AI drafts → same-mold detected → hand-rewrote all 8; uniqueness gate: subjects unique, worst body shingle-Jaccard 7.4% (<15%)
+- Stage 6: **1 sent** to Amex (info@amexindia.in) from jodiacwebservice@gmail.com; receipt pdfs/sent/amex_20260921_010058.pdf; final report campaign_final_20260921_010058.pdf; 7 drafts pending addresses
+- Enrichment reality: contact-finder 0/9, exec 0 — OSM rarely carries SMB contacts in small towns (feeds Phase 7)
+
+### Sender switch
+- jodiacwebservice@gmail.com configured, SMTP auth verified (235) BEFORE any send
+- Previous monaisnotapplicable (KANA) creds backed up in config.json as `gmail_previous`
+
+### Open items (Phase 7)
+- Uniqueness gate belongs inside draft_and_pdf_workflow, not as an out-of-band rewrite
+- Google Maps provider key (Outscraper/Apify) for contact coverage
+- 7 pending sends await addresses; reply-classification leg unbuilt
+
 ## Session: Architecture Refactoring
 **Date:** 2026-09-03
 **Status:** Complete
@@ -70,3 +114,73 @@ Verified:
 - Brain data persists across restarts (JSON files)
 
 Git: commit 1dbc2ae
+
+## Session 2026-09-21 (playtest & fix, part 2)
+
+Drove the office UI as a first user: careless chat input, empty send, double-send,
+history panel, mid-action reload, campaign gate edges. Found and fixed 5 defects:
+
+| # | Defect | Fix |
+|---|--------|-----|
+| 1 | Mid-action reload + stalled scrape = search results silently lost (only saved after full pipeline) | `workflows.py` persists `search_results.json` right after search succeeds |
+| 2 | One stalled site hung the scrape leg forever (CPU-idle, no timeout applied) | `business_enricher.py`: 30s daemon-thread watchdog per site, abandoned threads skipped |
+| 3 | Pause message says "say 'campaign' to resume" but bare `campaign` started a NEW discovery overwriting the shortlist | `action_dispatch._handle_campaign` resumes open gates instead of restarting |
+| 4 | Double final interview answer (or stale resumed replica) wiped stored angles | `campaign.answer_interview` merges, never replaces |
+| 5 | "Initial report ready — click to download: F:\...pdf" rendered as dead text | `app.js` linkifies report paths to /api/report/{initial,final}; CSS class added |
+
+Verified: watchdog unit test (stalled site skipped at 30s), live re-run of the
+reload-mid-search flow end-to-end (13 businesses persisted, chain completed,
+status correct from a new tab), resume-not-restart dispatch tests, angle-wipe
+regression tests, linkifier in-page test, audit 20/20, node --check all green.
+Not fixed (unsubstantiated): two /api/conversations 404s seen once in preview
+logs, no reference in any source; not reproducible in-page.
+
+## Session 2026-09-21 (resizable split)
+
+User request: make the floor/chat split adjustable. Added a draggable splitter:
+
+- `style.css`: .app grid gains a 0px grip track; --floor-fr drives the floor
+  share (designed 1.9fr default unchanged); grip bar/dots styling, hover/
+  active/focus states; grip hidden in the <=900px stacked layout.
+- `index.html`: <button id=splitGrip> between floor and cmd (real button,
+  keyboard-reachable per repo a11y convention).
+- `app.js` initSplitter: pointer drag (clamped 0.2-6 fr), localStorage
+  persistence (jarvis.floorFr) restored on load, arrow-key nudge (24px),
+  Home/double-click reset, click-without-move never saves.
+
+Bugs caught by live verification: setPointerCapture throws on stale pointer
+ids (aborted drag setup, stuck is-resizing) -> try/catch, window listeners
+carry the drag; raf-deferred write raced the pointerup read and saved stale
+values -> synchronous style writes. Verified via simulated desktop rig
+(zoom + matchMedia stub): floor 421->60px, chat 222->516px on drag, "Split
+saved." activity line, clean restore, zero console errors, audit 20/20.
+
+## Session 2026-09-21 (exclusion regression: "no colleges" ignored)
+
+User complaint: curated list full of colleges again; wants TRAINING centers
+(Dr. Kalam = the right kind). Root causes found:
+
+1. `extract_exclusions` splitter regex lacked "no" (and "dont want"): the
+   detector knew "no " but the splitter never split on it, so
+   "training centers no colleges" parsed to ZERO exclusions. Same class
+   as the Bandel "cllgs" bug, one marker word over. Fixed: splitter now
+   knows no/not/dont want/don't want/do not want with word boundaries;
+   "with no website" protected via lookbehind so target specs aren't bans;
+   repeated markers ("no X and no Y") become separate ban items.
+   10-case parser test all green; Bardhaman pool drops 5/6 college rows.
+
+2. Playtest's resume-not-restart fix OVERSWALLOWED: an explicit new
+   campaign request (location/category given) while a gate was open
+   resumed the OLD checklist instead of running the corrected discovery —
+   the second run's "success" was the old shortlist replayed. Fixed: only
+   a bare "campaign" resumes; explicit intent always starts fresh.
+   Both behaviors regression-tested.
+
+3. chatbot tool spec now demands exclusions verbatim for start_campaign
+   too (was only search_businesses).
+
+Result: live re-run "training centers no colleges and no universities and
+no schools" -> checklist = Dr. Kalam (training) + 1 clinic leaked by the
+ICP veto (AI said unlikely, ICP 'plausible' resurrected it — known veto
+policy tension, surfaced to user via the checklist gate rather than fixed
+by policy change). Audit 20/20 after changes.

@@ -179,20 +179,39 @@ def enrich_businesses(businesses: list[dict], scrape_reviews: bool = True) -> li
     """Enrich a list of businesses by scraping their websites.
     
     Returns the same list with enriched data added to each business dict.
+
+    Each business runs under a watchdog: a site whose fetch stalls past
+    _SCRAPER_TIMEOUT_S (DNS lookups and some TLS handshakes can ignore the
+    HTTP client's own timeout) is skipped, so one bad site can no longer
+    hang the whole scrape leg with the UI stuck on "Scraping N websites".
     """
+    import threading
+
+    _SCRAPER_TIMEOUT_S = 30
+
+    def _scrape_one(biz: dict, out: dict) -> None:
+        d = scrape_business(biz)
+        if scrape_reviews and not biz.get("rating"):
+            d.update(scrape_google_maps_reviews(
+                biz.get("name", ""),
+                biz.get("address", ""),
+            ))
+        out.update(d)
+
     enriched = []
     for biz in businesses:
         print(f"  [SCRAPER] Scraping {biz.get('name', 'Unknown')}...")
-        data = scrape_business(biz)
+        data: dict = {}
+        worker = threading.Thread(target=_scrape_one, args=(biz, data), daemon=True)
+        worker.start()
+        # daemon+join(timeout): a site whose fetch stalls past the limit is
+        # abandoned in place (its thread dies with the process); the
+        # concurrent.futures result(timeout) proved unreliable on this box.
+        worker.join(_SCRAPER_TIMEOUT_S)
+        if worker.is_alive():
+            print(f"  [SCRAPER] Timed out on {biz.get('name', '?')} "
+                  f"after {_SCRAPER_TIMEOUT_S}s -- skipped")
         biz.update(data)
-
-        if scrape_reviews and not biz.get("rating"):
-            reviews = scrape_google_maps_reviews(
-                biz.get("name", ""),
-                biz.get("address", ""),
-            )
-            biz.update(reviews)
-
         enriched.append(biz)
     return enriched
 

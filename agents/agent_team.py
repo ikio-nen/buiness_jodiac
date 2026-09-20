@@ -134,11 +134,28 @@ LEARN_SKILL_DECL = {
 }
 
 # ── The team ─────────────────────────────────────────────────────────
+# AGENTS is the built-in roster. It is NOT the team: the team is whatever
+# get_agent()/all_agent_keys() resolve — built-ins plus any runtime hires
+# (agents/hiring.py). Consumers must never import AGENTS directly; that
+# bypasses the roster and a hired agent becomes invisible to that consumer.
 
+# ── The roster: one owner per agent's identity ──────────────────────
+# name, role, look and station live HERE and nowhere else. /api/agents
+# serves exactly this record (built-ins and hires alike), and the web client
+# renders whatever it is handed — it keeps no roster of its own. Adding an
+# agent is an entry in this dict; nothing else needs to learn about it.
+#
+# `look` is the avatar schema the sprite renderer draws:
+#   skin  face tone        hair      hair colour
+#   hairStyle  short|buzz|bob|long|bun|curly|bald
+#   shirt top colour       accessory none|glasses|headset|cap|tie
 AGENTS = {
     "scout": {
         "name": "Scout",
         "role": "lead hunter",
+        "station": "station-scout",
+        "look": {"skin": "#f0c9a0", "hair": "#2b2b33", "hairStyle": "short",
+                 "shirt": "#4e8f7d", "accessory": "headset"},
         "persona": (
             "You are Scout, senior lead-generation researcher on a business-"
             "outreach team. You work like a diligence analyst at a top firm: "
@@ -160,6 +177,9 @@ AGENTS = {
     "strategist": {
         "name": "Strategist",
         "role": "outreach tactician",
+        "station": "station-strategist",
+        "look": {"skin": "#e8b98d", "hair": "#4a2c17", "hairStyle": "bob",
+                 "shirt": "#c1666b", "accessory": "glasses"},
         "persona": (
             "You are Strategist, a senior outbound strategist who has written "
             "hundreds of cold emails and knows reply rates are earned in the "
@@ -178,6 +198,9 @@ AGENTS = {
     "analyst": {
         "name": "Analyst",
         "role": "numbers and learning",
+        "station": "station-analyst",
+        "look": {"skin": "#c98f66", "hair": "#111114", "hairStyle": "buzz",
+                 "shirt": "#d9a441", "accessory": "glasses"},
         "persona": (
             "You are Analyst, the team's data scientist. You reason from "
             "evidence with a statistician's honesty: you distinguish counts "
@@ -191,10 +214,137 @@ AGENTS = {
             "recurring pattern worth institutionalizing, save it with learn_skill."
         ),
     },
+    "scraper": {
+        "name": "Scraper",
+        "role": "reads what they publish",
+        "station": "station-scraper",
+        "look": {"skin": "#f7d9b8", "hair": "#8a5a2b", "hairStyle": "long",
+                 "shirt": "#6b8fa3", "accessory": "none"},
+        "persona": (
+            "You are Scraper, the team's web reader. You turn a business's "
+            "public pages into facts we can stand behind. You separate what "
+            "a page states from what it is selling: marketing adjectives are "
+            "not evidence, a price list and a course catalogue are. You quote "
+            "exactly and never strengthen a claim in the retelling. What a "
+            "page omits is often your most useful finding -- no pricing, no "
+            "staff page, a course list last updated years ago -- and you "
+            "report omissions as omissions, not as facts. You say 'the page "
+            "does not say' rather than guessing. Structure: what we learned, "
+            "what is missing, what to check next. Save reusable extraction "
+            "tricks with learn_skill."
+        ),
+    },
+    "enricher": {
+        "name": "Enricher",
+        "role": "finds the decision-maker",
+        "station": "station-enricher",
+        "look": {"skin": "#d9a878", "hair": "#3a2a1a", "hairStyle": "curly",
+                 "shirt": "#b07d4f", "accessory": "headset"},
+        "persona": (
+            "You are Enricher, the team's contact hunter. A generic inbox "
+            "is a failure, not a result: your job is the human who decides. "
+            "You know who signs for training institutes and colleges -- "
+            "director, principal, placement officer, IT or lab head, "
+            "administrator -- and you reason about which of several "
+            "addresses is most likely to reach a person, and why. Every "
+            "contact you report carries its provenance (an email on the "
+            "contact page, a signature in a PDF, a registry entry) and a "
+            "plain confidence word: confirmed, likely, or guesswork. You "
+            "never present a pattern-matched guess as a real address. You "
+            "also flag the reverse: a named person with no reachable channel, "
+            "so the team stops hunting. Save what worked with learn_skill."
+        ),
+    },
+    "builder": {
+        "name": "Builder",
+        "role": "makes the demo",
+        "station": "station-builder",
+        "look": {"skin": "#e5b48a", "hair": "#2f2f38", "hairStyle": "short",
+                 "shirt": "#8e6fa8", "accessory": "none"},
+        "persona": (
+            "You are Builder, the team's demo maker. You take what a "
+            "business already publishes and show them, concretely, the small "
+            "change worth making -- a page, a one-pager, a catalogue layout, "
+            "a better course listing. You use their real name, their real "
+            "courses and their real details, taken from what the team "
+            "collected, so the demo reads as theirs. You label a mockup a "
+            "mockup, never a finished delivery, and you never invent "
+            "testimonials, logos, accreditation or a customer list. You "
+            "explain the ONE decision behind the design in a sentence a "
+            "non-designer would repeat. Save design patterns that landed "
+            "with learn_skill."
+        ),
+    },
+    "librarian": {
+        "name": "Librarian",
+        "role": "keeps the brain",
+        "station": "station-brain",
+        "look": {"skin": "#f0c9a0", "hair": "#5a5a66", "hairStyle": "bun",
+                 "shirt": "#7a6fa8", "accessory": "glasses"},
+        "persona": (
+            "You are Librarian, keeper of the brain. You answer from what "
+            "the team has actually recorded, and you say plainly when the "
+            "brain is silent instead of filling the gap with plausible "
+            "general knowledge. Your first move on any question is brain "
+            "query, not web search. You keep our vocabulary stable: one name "
+            "per thing, and you call out when two notes describe the same "
+            "business or industry under different spellings. You gather "
+            "scattered notes into one entry and keep the entry point-to: "
+            "what it is, what we know, what we still do not. You name things "
+            "so a stranger can find them later."
+        ),
+    },
+    "mailer": {
+        "name": "Mailer",
+        "role": "sends the mail",
+        "station": "station-mailer",
+        "look": {"skin": "#c98f66", "hair": "#3a2a1a", "hairStyle": "short",
+                 "shirt": "#6f9e58", "accessory": "cap", "accColor": "#b7534a"},
+        "persona": (
+            "You are Mailer, who owns the send leg. Before anything goes "
+            "out you check the boring things that actually matter: the "
+            "recipient is a person and not a placeholder, the subject line "
+            "is honest about what is inside, any attachment really exists on "
+            "disk, and the draft has been approved. If a check fails you say "
+            "which one failed and what you need, and you do not send. You "
+            "report per recipient, exactly as it happened -- sent, skipped, "
+            "failed -- and you never describe a send you did not observe. "
+            "Bounces, out-of-office replies and wrong-person answers are "
+            "findings you surface, not noise you swallow."
+        ),
+    },
 }
 
 
 # ── Per-agent memory ────────────────────────────────────────────────
+
+def get_agent(key: str) -> dict | None:
+    """Resolve one team member by key — built-ins first, then runtime hires.
+    Returns the agent record (name, role, persona, ...) or None. This is the
+    ONE roster interface: dispatch, chatbot, and the web API all resolve
+    through here so a hired agent exists everywhere at once."""
+    if not key:
+        return None
+    key = str(key).lower().strip()
+    if key in AGENTS:
+        return dict(AGENTS[key])
+    try:
+        from agents.hiring import get_hired
+        return get_hired(key)
+    except Exception:
+        return None
+
+
+def all_agent_keys() -> list[str]:
+    """Every resolvable team member: built-ins + active hires, stable order."""
+    keys = list(AGENTS)
+    try:
+        from agents.hiring import active_keys
+        keys.extend(k for k in active_keys() if k not in AGENTS)
+    except Exception:
+        pass
+    return keys
+
 
 def _brain_path(key: str) -> Path:
     return AGENT_BRAIN_DIR / f"{key}.json"
@@ -530,6 +680,83 @@ def propose_draft(business_name: str, to: str, subject: str, body: str,
 MAX_TOOL_ROUNDS = 3
 
 
+def _execute_tool(fname: str, fargs: dict, state: dict, key: str = "",
+                  session=None) -> dict:
+    """Run one tool the model asked for; the returned dict goes back to it.
+
+    Which tools exist and what they do is team policy, so it lives with the
+    team rather than in the seam. ``state`` accumulates what the run learned
+    (used_web, tools_used, drafts_saved, search_text) so ask_agent can report
+    it once the conversation finishes.
+    """
+    from agents.event_bus import emit
+
+    if not fname:
+        return {"result": ""}
+
+    if fname == "brain_query":
+        emit("bot", bot=key or "unknown", status="reading-brain",
+             task=str(fargs.get("query", ""))[:80], source="ask_agent")
+        brain_text = brain_query(fargs.get("query", ""),
+                                 fargs.get("area", ""))
+        state["tools_used"].append("brain_query")
+        return {"result": brain_text}
+
+    if fname == "web_search":
+        query = fargs.get("query", state.get("message", ""))
+        emit("bot", bot=key or "unknown", status="searching-web",
+             task=str(query)[:80], source="ask_agent")
+        found = web_search(query) or "(no results found for that)"
+        state["search_text"] = found
+        state["used_web"] = True
+        state["tools_used"].append("web_search")
+        return {"result": found}
+
+    if fname == "read_url":
+        page_text = read_url(fargs.get("url", "")) or "(could not read that URL)"
+        state["tools_used"].append("read_url")
+        state["used_web"] = True
+        return {"result": page_text}
+
+    if fname == "vault_query":
+        vault_text = vault_query(fargs.get("question", ""),
+                                 fargs.get("area", ""))
+        state["tools_used"].append("vault_query")
+        return {"result": vault_text}
+
+    if fname == "propose_draft":
+        res = propose_draft(
+            fargs.get("business_name", ""), fargs.get("to", ""),
+            fargs.get("subject", ""), fargs.get("body", ""),
+            session=session, agent_key=key)
+        state["tools_used"].append("propose_draft")
+        if res.get("saved"):
+            state["drafts_saved"] += 1
+            emit("packet", from_="strategist" if key == "strategist" else (key or "agent"),
+                 to="drafts", label=str(fargs.get("business_name", ""))[:30])
+        return {"result": res}
+
+    if fname == "learn_skill":
+        from agents.skills import learn_skill
+        saved = learn_skill(str(fargs.get("name", "")),
+                            str(fargs.get("description", "")),
+                            list(fargs.get("steps") or []),
+                            agents=[key or "agent"])
+        state["tools_used"].append("learn_skill")
+        emit("brain", action="skill " + ("refined" if saved.get("refined") else "learned"),
+             detail=str(fargs.get("name", ""))[:60], source="ask_agent")
+        return {"result": {
+            "saved": True, "name": saved.get("name"),
+            "refined": bool(saved.get("refined")),
+            "note": "skill is now in the team library"}}
+
+    # Unknown tool name: feed an error back so the model can recover instead
+    # of dead-ending the conversation.
+    return {"error": f"tool '{fname}' is not available. Use brain_query, "
+                     f"web_search, read_url, vault_query, or propose_draft -- "
+                     f"or just answer directly."}
+
+
 def ask_agent(key: str, message: str, chat_history: list[dict] = None,
               session=None, goal: str = "") -> dict:
     """Chat with one specialist agent. They remember, and they can act.
@@ -538,9 +765,13 @@ def ask_agent(key: str, message: str, chat_history: list[dict] = None,
              tools_used, drafts_saved}.
     """
     from agents.event_bus import emit
-    spec = AGENTS.get((key or "").lower())
+    # Resolve through the roster seam, never the bare AGENTS dict: a runtime
+    # hire is a team member too, and a direct AGENTS lookup silently skipped
+    # them (they could be listed but never asked to work).
+    spec = get_agent(key)
     if not spec:
         raise ValueError(f"Unknown agent: {key}")
+    key = str(key or "").lower().strip()
     name = spec["name"]
     message = (message or "").strip() or "Introduce yourself and what you can help with."
 
@@ -597,158 +828,30 @@ def ask_agent(key: str, message: str, chat_history: list[dict] = None,
         contents.append({"role": role, "parts": [{"text": turn.get("content", "")}]})
     contents.append({"role": "user", "parts": [{"text": message}]})
 
-    from agents.ai_engine import _get_client
-    client = _get_client()
-    from google.genai import types
-    from agents.config import get_ai_model
-
     tool_decls = [{"function_declarations": [BRAIN_QUERY_DECL, WEB_SEARCH_DECL,
                                               READ_URL_DECL, VAULT_QUERY_DECL,
                                               PROPOSE_DRAFT_DECL, LEARN_SKILL_DECL]}]
 
     _injected_skills = skill_names_for(key or "")
 
-    used_web = False
-    tools_used = []
-    drafts_saved = 0
-    search_text = ""
-    reply = ""
-    last_err = None
-    try:
-        for _ in range(MAX_TOOL_ROUNDS + 1):
-            response = client.models.generate_content(
-                model=get_ai_model(),
-                contents=contents,
-                config=types.GenerateContentConfig(
-                    system_instruction=system,
-                    tools=tool_decls,
-                    temperature=0.4,
-                ),
-            )
-            part = None
-            model_content = None
-            if response.candidates and response.candidates[0].content:
-                model_content = response.candidates[0].content
-                parts = model_content.parts
-                part = parts[0] if parts else None
+    # The whole tool-using conversation runs through the seam: the SDK, the
+    # model, the quota-aware retry policy and the call/result protocol belong
+    # to agents/ai. What stays here is policy -- which tools exist, what each
+    # does, and what the run learned.
+    state = {"used_web": False, "tools_used": [], "drafts_saved": 0,
+             "search_text": "", "message": message}
+    from agents.ai import service as ai
+    turn = ai.converse(
+        "agent_chat", contents=contents, system=system, tools=tool_decls,
+        temperature=0.4, max_rounds=MAX_TOOL_ROUNDS + 1,
+        execute=lambda fname, fargs: _execute_tool(fname, fargs, state,
+                                                   key=key, session=session))
 
-            fname = None
-            fargs = {}
-            if part and hasattr(part, "function_call") and part.function_call:
-                fname = part.function_call.name
-                fargs = dict(part.function_call.args or {})
-
-            if fname == "brain_query":
-                emit("bot", bot=key or "unknown", status="reading-brain",
-                     task=str(fargs.get("query", ""))[:80], source="ask_agent")
-                brain_text = brain_query(fargs.get("query", ""),
-                                         fargs.get("area", ""))
-                tools_used.append("brain_query")
-                contents.append(model_content)
-                contents.append(types.Content(
-                    role="user",
-                    parts=[types.Part(function_response=types.FunctionResponse(
-                        name="brain_query", response={"result": brain_text}))],
-                ))
-                continue
-
-            if fname == "web_search":
-                query = fargs.get("query", message)
-                emit("bot", bot=key or "unknown", status="searching-web",
-                     task=str(query)[:80], source="ask_agent")
-                search_text = web_search(query) or "(no results found for that)"
-                used_web = True
-                tools_used.append("web_search")
-                contents.append(model_content)
-                contents.append(types.Content(
-                    role="user",
-                    parts=[types.Part(function_response=types.FunctionResponse(
-                        name="web_search", response={"result": search_text}))],
-                ))
-                continue
-
-            if fname == "read_url":
-                page_text = read_url(fargs.get("url", "")) or "(could not read that URL)"
-                tools_used.append("read_url")
-                used_web = True
-                contents.append(model_content)
-                contents.append(types.Content(
-                    role="user",
-                    parts=[types.Part(function_response=types.FunctionResponse(
-                        name="read_url", response={"result": page_text}))],
-                ))
-                continue
-
-            if fname == "vault_query":
-                vault_text = vault_query(fargs.get("question", ""),
-                                         fargs.get("area", ""))
-                tools_used.append("vault_query")
-                contents.append(model_content)
-                contents.append(types.Content(
-                    role="user",
-                    parts=[types.Part(function_response=types.FunctionResponse(
-                        name="vault_query", response={"result": vault_text}))],
-                ))
-                continue
-
-            if fname == "propose_draft":
-                res = propose_draft(
-                    fargs.get("business_name", ""), fargs.get("to", ""),
-                    fargs.get("subject", ""), fargs.get("body", ""),
-                    session=session, agent_key=key)
-                tools_used.append("propose_draft")
-                if res.get("saved"):
-                    drafts_saved += 1
-                    emit("packet", from_="strategist" if key == "strategist" else (key or "agent"),
-                         to="drafts", label=str(fargs.get("business_name", ""))[:30])
-                contents.append(model_content)
-                contents.append(types.Content(
-                    role="user",
-                    parts=[types.Part(function_response=types.FunctionResponse(
-                        name="propose_draft", response={"result": res}))],
-                ))
-                continue
-
-            if fname == "learn_skill":
-                from agents.skills import learn_skill
-                saved = learn_skill(str(fargs.get("name", "")),
-                                    str(fargs.get("description", "")),
-                                    list(fargs.get("steps") or []),
-                                    agents=[key or "agent"])
-                tools_used.append("learn_skill")
-                emit("brain", action="skill " + ("refined" if saved.get("refined") else "learned"),
-                     detail=str(fargs.get("name", ""))[:60], source="ask_agent")
-                contents.append(model_content)
-                contents.append(types.Content(
-                    role="user",
-                    parts=[types.Part(function_response=types.FunctionResponse(
-                        name="learn_skill", response={"result": {
-                            "saved": True, "name": saved.get("name"),
-                            "refined": bool(saved.get("refined")),
-                            "note": "skill is now in the team library"}}))],
-                ))
-                continue
-
-            if fname:
-                # Unknown tool name: feed an error back so the model can
-                # recover instead of dead-ending the conversation.
-                contents.append(model_content)
-                contents.append(types.Content(
-                    role="user",
-                    parts=[types.Part(function_response=types.FunctionResponse(
-                        name=fname,
-                        response={"error": f"tool '{fname}' is not available. Use "
-                                            f"brain_query, web_search, read_url, "
-                                            f"vault_query, or propose_draft -- or "
-                                            f"just answer directly."}))],
-                ))
-                continue
-
-            if part and hasattr(part, "text") and part.text:
-                reply = part.text
-            break
-    except Exception as e:
-        last_err = e
+    used_web = state["used_web"]
+    tools_used = state["tools_used"]
+    drafts_saved = state["drafts_saved"]
+    search_text = state["search_text"]
+    reply = turn.text
 
     if not reply:
         if search_text:
@@ -756,8 +859,8 @@ def ask_agent(key: str, message: str, chat_history: list[dict] = None,
             # the raw findings instead of an error.
             reply = (f"{name} here. I searched the web before my thoughts got "
                      f"cut off -- here's what I found:\n{search_text[:600]}")
-        elif last_err is not None:
-            reply = f"{name} hit an error mid-thought ({type(last_err).__name__}). Try again."
+        elif turn.error:
+            reply = f"{name} hit an error mid-thought ({turn.error_type}). Try again."
         else:
             reply = f"{name} couldn't finish that lookup. Ask again?"
 

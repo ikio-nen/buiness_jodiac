@@ -75,6 +75,24 @@ def find_executives(businesses: list[dict], max_seconds: float = 90.0) -> dict:
             person = _apollo_person(biz.get("name", ""), domain, apollo_key)
 
         if not person or not person.get("email"):
+            # Providers came up empty — one AI pass over the already-scraped
+            # page text, behind these heuristics (PRD §4.6). Best-effort.
+            try:
+                from agents.ai import service as ai_service
+                from agents.ai.schemas import Business
+                text = " ".join(filter(None, [
+                    biz.get("description", ""),
+                    " ".join(biz.get("emails_found") or [])[:200],
+                ]))
+                if text.strip():
+                    for cand in ai_service.extract_contact(text):
+                        if cand.email and "@" in cand.email:
+                            person = {"email": cand.email, "name": cand.name,
+                                      "title": cand.title, "source": "ai_extract"}
+                            break
+            except Exception:
+                pass
+        if not person or not person.get("email"):
             time.sleep(0.3)
             continue
 

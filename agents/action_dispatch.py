@@ -27,6 +27,10 @@ def dispatch(action_type: ActionType, params: dict, session) -> dict:
     """
     sender = get_sender_name()
 
+    # The registry owns the ack line; handlers own the behavior. The ack
+    # here is the CLI-visible fallback — the web layer uses its own ack
+    # from action.response (which chatbot.py builds from the same table).
+    from agents.action_registry import ack_for
     handlers = {
         ActionType.SEARCH: lambda: _handle_search(params, session, sender),
         ActionType.DRAFT: lambda: _handle_draft(params, session, sender),
@@ -42,11 +46,19 @@ def dispatch(action_type: ActionType, params: dict, session) -> dict:
         ActionType.CHECKIN: lambda: _handle_checkin(),
         ActionType.ASK_AGENT: lambda: _handle_ask_agent(params, session),
         ActionType.TEAM_ACT: lambda: _handle_team_act(session),
+        ActionType.CAMPAIGN: lambda: _handle_campaign(params, session, sender),
     }
 
     handler = handlers.get(action_type)
     if handler:
-        return handler()
+        result = handler()
+        # One registry rule: a dispatched action with no ack of its own
+        # falls back to the table's ack line.
+        if isinstance(result, dict) and not result.get("message"):
+            table_ack = ack_for(action_type)
+            if table_ack:
+                result = {**result, "message": table_ack}
+        return result
 
     return {
         "success": False,
@@ -233,13 +245,34 @@ def _handle_send(params: dict, session, sender: str) -> dict:
     if session.active:
         session.save_data({"sent": result.get("sent", [])}, "sent_emails.json")
 
+    # Final PDF report + campaign bookkeeping. Best-effort: a reporting
+    # failure must not turn an executed send into a reported failure.
+    final_pdf = ""
+    try:
+        from agents.campaign import final_report_pdf, get_state, mark_sent
+        final_pdf = final_report_pdf(
+            result.get("sent_records", []),
+            result.get("errors", []),
+            len(result.get("skipped", [])),
+            session.name or "",
+        )
+        if get_state(session.id).get("phase"):
+            mark_sent(session.id)
+        if session.active:
+            session.save_data({"final_pdf": final_pdf}, "campaign_final.json")
+    except Exception as e:
+        print(f"  [CAMPAIGN] final report failed: {e}")
+
     sent = len(result.get("sent", []))
-    errors = len(result.get("errors", []))
+    errors_n = len(result.get("errors", []))
+    msg = f"Sent {sent} emails, {errors_n} errors"
+    if final_pdf:
+        msg += f"\n  Final report ready: {final_pdf}"
 
     return {
         "success": sent > 0,
-        "message": f"Sent {sent} emails, {errors} errors",
-        "data": result,
+        "message": msg,
+        "data": {**result, "final_pdf": final_pdf},
         "live_events": [],
     }
 
@@ -365,6 +398,17 @@ def _handle_enrich(params: dict, session) -> dict:
             else:
                 msg += (f"\n  [contact] domain hunt found no emails for "
                         f"{contact['searched']} businesses — drafts will need manual addresses")
+            unverified = [r for r in contact["results"]
+                          if r.get("email") and not r.get("verified")]
+            if unverified:
+                # Say it out loud: these were found on a domain guessed from the
+                # business name, and a name is not an identity. They are NOT set
+                # as the recipient, so the batch will not silently mail a
+                # same-named institution in another state.
+                msg += ("\n  [contact] " + str(len(unverified)) + " address(es) came from a "
+                        "domain guessed from the name and are NOT set as recipients "
+                        "(check them by hand): "
+                        + ", ".join(f"{r['name']} → {r['email']}" for r in unverified)[:300])
         return {"success": True, "message": msg, "data": result, "live_events": []}
 
     return {
@@ -413,11 +457,11 @@ def _handle_team_act(session=None) -> dict:
 
 def _handle_ask_agent(params: dict, session=None) -> dict:
     """Route a question to a specialist agent (their own brain + tools)."""
-    from agents.agent_team import ask_agent, AGENTS
+    from agents.agent_team import ask_agent, get_agent, all_agent_keys
 
     key = (params.get("agent") or "").lower()
-    if key not in AGENTS:
-        roster = ", ".join(sorted(AGENTS))
+    if not get_agent(key):
+        roster = ", ".join(sorted(all_agent_keys()))
         return {"success": False, "message": f"No specialist named '{key}'. The team: {roster}.",
                 "data": {}, "live_events": []}
 
@@ -466,6 +510,109 @@ def _handle_review(session) -> dict:
         "message": f"{len(drafts)} draft(s) available, {approved} approved, "
                    f"{pending} still pending review.",
         "data": {"total": len(drafts), "approved": approved, "pending": pending},
+        "live_events": [],
+    }
+
+
+def _handle_campaign(params: dict, session, sender: str) -> dict:
+    """Guided campaign: discover + curate the shortlist, then STOP.
+
+    The result carries ``campaign_checklist`` data; the web layer turns it
+    into the interactive checklist and does not run another stage until the
+    user approves a selection. The CLI path just shows the curated list and
+    tells the user to select.
+    """
+    from agents.campaign import (curate_workflow, start_selection,
+                                 get_state, checklist_payload)
+
+    location = params.get("location", "")
+    radius = int(params.get("radius", 2000) or 2000)
+    category = params.get("category", "")
+    goal = params.get("goal", "")
+
+    if not session.active:
+        return {"success": False, "message": "No active session — start one first.",
+                "data": {}, "live_events": []}
+
+    # A paused gate resumes instead of restarting: bare "campaign" must not
+    # silently run a new discovery and overwrite the saved shortlist/angles
+    # (the pause message literally tells the user to do this). An EXPLICIT
+    # new request — a location or category named — always starts fresh: the
+    # user asking "campaign in X, training centers only" while a gate is
+    # open wants the NEW intent, not the old shortlist replayed. This exact
+    # swallow made a corrected "...and no schools" request return the old
+    # school-filled checklist unchanged.
+    state = get_state(session.id)
+    explicit_restart = bool((params.get("location") or "").strip()
+                            or (params.get("category") or "").strip())
+    if (state.get("phase") in ("awaiting_selection", "interview")
+            and not explicit_restart):
+        payload = checklist_payload(state)
+        if state["phase"] == "awaiting_selection" and payload.get("businesses"):
+            lines = [f"Resuming campaign in {state.get('location') or 'your area'} — "
+                     f"{len(payload['businesses'])} curated candidates are still waiting."]
+            lines.append("Tick the ones you want and approve the checklist — "
+                         "nothing was lost while it was paused.")
+            return {"success": True, "message": "\n".join(lines),
+                    "data": {"campaign_checklist": payload}, "live_events": []}
+        if state["phase"] == "interview":
+            from agents.campaign import current_question
+            return {"success": True,
+                    "message": "Resuming the tuning round. " + current_question(state),
+                    "data": {"campaign_checklist": payload}, "live_events": []}
+
+    location = params.get("location", "")
+    radius = int(params.get("radius", 2000) or 2000)
+    category = params.get("category", "")
+    goal = params.get("goal", "")
+
+    if not location:
+        return {"success": False, "message": "No location provided for the campaign.",
+                "data": {}, "live_events": []}
+
+    result = curate_workflow(
+        location, radius, category, goal, sender,
+        session.id, session.name or "",
+    )
+    if result.get("error"):
+        return {"success": False, "message": f"Campaign discovery failed: {result['error']}",
+                "data": {}, "live_events": []}
+
+    curated = result.get("curated", [])
+    state = start_selection(session.id, location, radius, category, goal, curated)
+
+    # Persist the full search exactly like _handle_search does, so every
+    # downstream consumer (draft, send, enrich, status) sees this campaign's
+    # data; the curated shortlist becomes the default 'no_website' batch.
+    report = result.get("report", {})
+    curated_full = result.get("curated", [])
+    try:
+        session.save_data({
+            "location": location, "radius": radius,
+            "businesses": report.get("businesses", []),
+            "no_website": curated_full,
+            "goal": report.get("search", {}).get("goal", ""),
+        }, "search_results.json")
+    except Exception:
+        pass
+
+    lines = [f"Found and curated {len(curated)} candidates in {location}:"]
+    for i, b in enumerate(state.get("curated", []), 1):
+        contact = b.get("email") or b.get("phone") or "no contact on file"
+        lines.append(f"  {i}. {b.get('name', '?')} — {b.get('category', '') or 'n/a'} ({contact})")
+    lines.append("")
+    lines.append("Review, tick the ones you want, and approve the checklist "
+                 "in the panel — I will not go further until you do.")
+
+    return {
+        "success": True,
+        "message": "\n".join(lines),
+        "data": {"campaign_checklist": {
+            "location": state.get("location", ""),
+            "goal": state.get("goal", ""),
+            "businesses": state.get("curated", []),
+            "selected": state.get("selected", []),
+        }},
         "live_events": [],
     }
 

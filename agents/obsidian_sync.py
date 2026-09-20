@@ -789,3 +789,103 @@ def update_vault_index():
     index_path = OBSIDIAN_VAULT / "00 - Index.md"
     index_path.write_text("\n".join(lines), encoding="utf-8")
     return str(index_path)
+
+
+# ── The sync workflow (moved from workflows.py — this is its owner) ──
+
+def run_sync_workflow(businesses: list, session_id: str,
+                      project_name: str, approached: list = None) -> dict:
+    """Sync everything to Obsidian — all note types with cross-links.
+
+    The sync leg of the outreach pipeline: writes project, contact,
+    industry, research, competitor, follow-up, and insight notes, then
+    refreshes the vault index, dashboard upgrades, and brain map.
+    """
+    from agents.event_bus import emit
+    emit("bot", bot="librarian", status="thinking",
+         task=f"Syncing {len(businesses)} business(es) to Obsidian", source="workflow")
+    paths = []
+
+    # 1. Project note
+    path = create_project_note(session_id, project_name, businesses)
+    paths.append(path)
+
+    # 2. Contact notes + industry grouping
+    by_cat = {}
+    for biz in businesses:
+        p = create_contact_note(biz, biz.get("enrichment"), session_id, project_name)
+        paths.append(p)
+        cat = biz.get("category", "other")
+        by_cat.setdefault(cat, []).append(biz)
+
+    # 3. Industry notes
+    for cat, cat_biz in by_cat.items():
+        p = create_industry_note(cat, cat_biz)
+        paths.append(p)
+
+    # 4. Research note
+    p = create_research_note(session_id, project_name, businesses, businesses)
+    paths.append(p)
+
+    # 5. Competitor notes (top businesses)
+    for biz in businesses[:5]:
+        p = create_competitor_note(biz, session_id)
+        paths.append(p)
+
+    # 6. Follow-up notes
+    for biz in (approached or []):
+        p = create_followup_note(biz, session_id)
+        paths.append(p)
+
+    # 7. Insight note
+    insights = {
+        "Total businesses": len(businesses),
+        "Without website": len([b for b in businesses if not b.get("website")]),
+        "Industries": ", ".join(sorted(by_cat.keys())),
+    }
+    p = create_insight_note(session_id, project_name, businesses, insights)
+    paths.append(p)
+
+    # 8. Outreach form
+    if approached:
+        p = create_outreach_form(session_id, approached, project_name)
+        paths.append(p)
+
+    # 9. Per-business research notes (from session research data)
+    try:
+        from agents.session import Session as _S
+        _tmp = _S()
+        _tmp.id = session_id
+        research_data = _tmp.load_research()
+        if research_data:
+            for biz in businesses:
+                for r in research_data:
+                    if r.get("name") == biz.get("name") and not r.get("error"):
+                        p = create_business_research_note(biz, r, session_id)
+                        paths.append(p)
+                        break
+    except Exception:
+        pass
+
+    # 10. Update vault index
+    emit("bot", bot="librarian", status="done",
+         task=f"Vault synced: {len(paths)} notes", source="workflow")
+    idx = update_vault_index()
+    paths.append(idx)
+
+    # 11. Dashboard, timeline, tags, graph config, brain map
+    try:
+        from agents.obsidian_upgrade import run_all_upgrades
+        upgraded = run_all_upgrades()
+        paths.extend(upgraded)
+    except Exception:
+        pass
+
+    # 12. Brain map
+    try:
+        bm = create_brain_map()
+        paths.append(bm)
+    except Exception:
+        pass
+
+    return {"paths": paths, "vault": str(OBSIDIAN_VAULT)}

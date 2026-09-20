@@ -181,9 +181,17 @@ def _contact_page_urls(homepage: str, page) -> list[str]:
 
 def find_email_for_business(biz: dict, max_seconds: float = 45.0,
                             max_fetches: int = 12) -> dict:
-    """Hunt one business's email. Returns {email, domain, source} ('' on miss).
+    """Hunt one business's email. Returns {email, domain, source, verified}.
 
     Order: existing website -> Bing-found site -> probed name domains.
+
+    `verified` says whether the page an address came off is confirmed to be
+    THIS business: its own listed site, or a site a search engine returned for
+    its name. A domain *probed from the name* is a guess, and names are not
+    unique — "Don Bosco School" in Bandel probed its way to a Don Bosco school
+    in Kattappana, Kerala, and harvested that school's address. Guesses are
+    still returned (they are the only lead for a business with no web presence
+    at all) but flagged, and callers must not treat them as a verified contact.
     """
     started = time.monotonic()
     fetches = 0
@@ -194,18 +202,20 @@ def find_email_for_business(biz: dict, max_seconds: float = 45.0,
     name = biz.get("name", "")
     tokens = _name_tokens(name)
     found_email, found_domain, source = "", "", ""
+    verified = False
 
-    # Candidate homepages: existing site first, then search, then probes.
-    homepages = []
+    # Candidate homepages, each with whether it is known to be this business:
+    # its own listed site and a search-verified site are; a probed domain is not.
+    homepages: list[tuple[str, bool]] = []
     if biz.get("website"):
-        homepages.append(biz["website"] if biz["website"].startswith("http")
-                         else "https://" + biz["website"])
+        homepages.append((biz["website"] if biz["website"].startswith("http")
+                          else "https://" + biz["website"], True))
 
     if budget_left():
         fetches += 1
         site = _official_site_from_search(name)
-        if site and site not in homepages:
-            homepages.append(site)
+        if site and site not in [h for h, _ in homepages]:
+            homepages.append((site, True))
 
     if budget_left():
         for d in _candidate_domains(name):
@@ -214,10 +224,10 @@ def find_email_for_business(biz: dict, max_seconds: float = 45.0,
             fetches += 1
             base = _probe_domain(d, tokens)
             if base:
-                homepages.append(base)
+                homepages.append((base, False))
                 break
 
-    for hp in homepages:
+    for hp, is_verified in homepages:
         if not budget_left():
             break
         page = _fetch(hp, timeout=8)
@@ -228,6 +238,7 @@ def find_email_for_business(biz: dict, max_seconds: float = 45.0,
             getattr(page, "html_content", "") or "")
         if emails:
             found_email, found_domain, source = emails[0], re.sub(r"^https?://", "", hp).split("/")[0], "homepage"
+            verified = is_verified
             break
         for c_url in _contact_page_urls(hp, page):
             if not budget_left():
@@ -242,11 +253,13 @@ def find_email_for_business(biz: dict, max_seconds: float = 45.0,
                 found_email = emails[0]
                 found_domain = re.sub(r"^https?://", "", hp).split("/")[0]
                 source = "contact_page"
+                verified = is_verified
                 break
         if found_email:
             break
 
-    return {"email": found_email, "domain": found_domain, "source": source}
+    return {"email": found_email, "domain": found_domain, "source": source,
+            "verified": verified}
 
 
 def find_contacts(businesses: list[dict], sleep_between: float = 0.4,
@@ -257,10 +270,12 @@ def find_contacts(businesses: list[dict], sleep_between: float = 0.4,
     is left, so a batch of misses is bounded instead of costing 45s x N, and no
     single hunt can eat the whole batch.
 
-    Returns {searched, found, empty, results:[{name, email, domain, source}]}.
+    Returns {searched, found, empty, guessed, results:[{name, email, domain,
+    source, verified}]}.
     """
     searched = found = 0
     empty: list[str] = []
+    guessed: list[str] = []
     results: list[dict] = []
 
     pending = [b for b in businesses
@@ -279,16 +294,25 @@ def find_contacts(businesses: list[dict], sleep_between: float = 0.4,
         hit = find_email_for_business(biz, max_seconds=share)
         biz["contact_finder_email"] = hit["email"]
         biz["contact_finder_domain"] = hit["domain"]
-        if hit["email"] and not biz.get("email"):
+        # Only a VERIFIED address is promoted to `email`, because that is the
+        # field the draft/send steps use as the recipient. An address harvested
+        # from a guessed domain stays visible in contact_finder_email to be
+        # checked by hand, instead of being queued up to a stranger.
+        if hit["email"] and hit.get("verified") and not biz.get("email"):
             biz["email"] = hit["email"]
+        elif hit["email"]:
+            guessed.append(hit["email"])
         if hit["email"]:
             found += 1
-            log(f"  [CONTACT] found {hit['email']} via {hit['domain']} ({hit['source']})")
+            how = "" if hit.get("verified") else "  [unverified — domain guessed from the name, not promoted to a recipient]"
+            log(f"  [CONTACT] found {hit['email']} via {hit['domain']} ({hit['source']}){how}")
         else:
             empty.append(name)
             log(f"  [CONTACT] nothing for {name}")
         results.append({"name": name, "email": hit["email"],
-                        "domain": hit["domain"], "source": hit["source"]})
+                        "domain": hit["domain"], "source": hit["source"],
+                        "verified": hit.get("verified", False)})
         time.sleep(sleep_between)
 
-    return {"searched": searched, "found": found, "empty": empty, "results": results}
+    return {"searched": searched, "found": found, "empty": empty,
+            "guessed": guessed, "results": results}

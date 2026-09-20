@@ -7,6 +7,9 @@
 - `json.dumps()` on Windows: add `ensure_ascii=True` to avoid cp932 encoding errors when writing to files.
 - Node.js v24.20.0 + npm 10.2.5 available. OmniRoute (AI gateway) installed globally but has dependency issues — needs `tsx` and `ws` packages.
 - Starting background processes on Windows: `Start-Process -RedirectStandardOutput` and `-RedirectStandardError` MUST go to different files or it fails silently. Git Bash `start //B ""` works for backgrounding.
+- The run_terminal_command tool has no working `BACKGROUND` process_type (errors "not implemented") — detach with `powershell (Start-Process ... -PassThru).Id > /tmp/pid.txt`, then poll the pid and port in a follow-up command.
+- The project's self-check suite is `agents/test_final_audit.py` (20 checks) — there is no `agents/test_audit_suite.py`. Run `"E:/python.exe" -X utf8 agents/test_final_audit.py`.
+- The `websockets` package IS installed in `E:\python.exe` — drive `/ws` at the protocol level (send raw `{"type": ...}` frames) to test server handlers a browser can't reach, e.g. stale/malformed frames.
 
 ## Gemini API
 
@@ -25,6 +28,7 @@
 - Wikidata API (P856 property) finds websites OSM misses — essential for the "no site" detection that was broken (DBB Bandel bug).
 - Overpass returns non-business POIs: parks (`leisure=park`), playgrounds (`leisure=playground`), churches (`amenity=place_of_worship`), government offices (`amenity=townhall`). Filter them out with EXCLUDE_TAGS in `map_search.py`.
 - Category filtering is POST-search, NOT pre-search. Mapping 'education' to `amenity` tag returns ALL amenities (hospitals, restaurants). Correct: search ALL categories, then filter results by category keywords/AI.
+- User exclusions ("remove schools and cllgs") are USER AUTHORITY in `category_filter.py`: `extract_exclusions()` parses them deterministically (typos/plurals map via EXCLUSION_LEXICON + `_KEYWORD_TYPOS`), and Stage 0 hard-drops matches BEFORE the ICP veto or the AI can resurrect them. The ICP veto (which once silently kept every AI-dropped school at 92 fit) is now surfaced in the report as "[ICP veto kept N: names]" — never let a filter stage silently override another. chatbot.py's search_businesses tool spec must pass the user's category phrase VERBATIM; synonym-expanding it there strips the exclusion half and reintroduces the Bandel failure. `_evidence_note()` carries description/operator/brand/courses tags to the AI judge so "do they teach AutoCAD" is judged from source evidence, not name strings.
 
 ## Scrapling (Web Scraping)
 
@@ -41,9 +45,19 @@
 - **Business profile** lives in config.json under `business_profile` key. Flows into AI prompts via `get_business_context()`.
 - **Industry research cache**: `knowledge_base/industry_research.json` — new industries researched via Gemini and cached. Empty string categories must return fallback immediately (was caching `""` as a real industry).
 - **jarvis.py** is now a thin dispatcher (~330 lines). Heavy logic lives in: `pipeline_handler.py`, `chat_handler.py`, `setup_handler.py`, `dashboard_handler.py`.
-- **Event bus**: `agents/event_bus.py` is a thread-safe pub/sub. Workflows, brain, and agent_team `emit()` telemetry; `web/server.py` subscribes per-WebSocket and forwards as `agent_event` frames. Kinds: `bot`, `packet`, `brain`, `step`, `team`. Emit must never raise — telemetry can't break the pipeline.
+- **Event bus**: `agents/event_bus.py` is a thread-safe pub/sub. Workflows, brain, and agent_team `emit()` telemetry; `web/ws.py` subscribes per-WebSocket and forwards as `agent_event` frames. Kinds: `bot`, `packet`, `brain`, `step`, `team`. Emit must never raise — telemetry can't break the pipeline.
 - **Brain ↔ bots channel**: specialist agents (scout/strategist/analyst) have a `brain_query` tool (`agents/agent_team.py`) that keyword-searches the outreach brain (businesses, industries, strategies, insights). Prompt tells them to check brain_query BEFORE web_search for our own history.
 - **Agent Ops floor**: `index.html` `#opsFloor` + `app.js` ops section animate little bots between stations on `agent_event` WS frames. Station positions are CSS %; adding a station means HTML + CSS position + `app.js` routing maps (`BOT_HOME`, packet to/from mapping).
+
+## Gemini Service Seam (agents/ai/)
+
+- One module owns every Gemini call: `agents/ai/service.py` (`GeminiService`). Consumers call typed capability methods (`score_fit`, `summarize_profile`, `draft_email`, `classify_reply`, `expand_query`, `extract_contact`) — never the SDK, a prompt string, or a key.
+- `ai_engine.py` stays the low-level engine (key, retries, model name); `agents/ai/gemini_client.py` is the only bridge. A new AI behavior = a new capability method + a versioned prompt file in `agents/ai/prompts/` (first line must be `<!-- version: N -->`), never an inline prompt in a consumer.
+- Every capability has a heuristic fallback in `fallbacks.py` (score_fit's floor is the deterministic ICP verdict — AI may only add a rationale, never override the verdict). A Gemini outage degrades, never blocks.
+- `score_fit`/`summarize_profile` are memoized per business in `cache.py` (`rescore()` to invalidate); drafts and reply classifications are never cached.
+- `gemini_client.converse()` owns the function-calling protocol and the retry/quota policy for BOTH the intent parser (`chatbot.py`) and the specialist agents (`agent_team.py`) — a `converse` call must be the only way a consumer reaches the model. Prompt TEXT is not the seam's business: a static capability prompt is a versioned file, a dynamic system instruction (persona/memory/skills/ICP) is assembled by the module that owns that context and passed in.
+- `usage_log.py` writes one JSONL record per call under `agent_output/usage/usage.jsonl` and emits a `brain` event (`action="ai"`) the office feed renders. `stats()` gives per-capability call/gemini/fallback counts.
+- Pipeline dicts → typed models go through `agents/ai/scrape_adapter.py:to_business()`; snippets carry scraped description text for grounding.
 
 ## Chatbot Patterns
 
@@ -52,17 +66,28 @@
 - Chat memory (`chat_memory.py`) stores all messages in SQLite at `F:/jodiac/agent_output/memory/conversations.db`. Use `get_memory(session_id)` to get the active memory instance.
 - The chatbot passes conversation context (last 10 messages) AND session state (businesses found, drafts, profile) to Gemini so it can reference earlier turns.
 - SQLite uses `PRAGMA journal_mode=WAL` for concurrent reads/writes (CLI + WebSocket can access the same DB). Close connections in `finally` blocks to prevent leaks on WebSocket disconnect.
+- `ChatMemory` inserts its conversation row on first WRITE, not on construction, so read-only callers no longer litter the DB with empty "New conversation" rows; `conversation_exists(id)` is the public existence check that lets a read endpoint 404 instead of returning an empty list.
 - `chat_memory.get_memory()` caches ONE shared `ChatMemory`; `close_memory()` (WS disconnect) closes that connection — any code still holding the cached instance crashes with "Cannot operate on a closed database". Fix lives in `ChatMemory._ensure()`: every method re-opens the connection if closed. Never assume `.conn` stays valid across a disconnect.
-- Adding a new ActionType requires updating THREE files: `chatbot.py` (parsing + function call handler), `chat_handler.py` (CLI dispatch), `web/server.py` (WebSocket dispatch).
+- Adding a new ActionType requires updating THREE files: `chatbot.py` (parsing + function call handler), `chat_handler.py` (CLI dispatch), `web/ws.py` (WebSocket dispatch) — plus one row in `agents/action_registry.py` (progress line, result-frame kind, ack-skip).
 
 ## Web UI (FastAPI)
 
-- FastAPI + WebSocket server at `agents/web/server.py`. Start with `python -m agents.web.server` or press `[W]` in main menu.
+- `agents/web/server.py` is ASSEMBLY only (~50 lines): builds the app, mounts `/static`, includes two routers, starts uvicorn. The behavior lives beside it — `api.py` (HTTP routes), `ws.py` (the socket + message routing), `job_queue.py` (per-socket action queue), `dispatch_bridge.py` (action → action_dispatch → UI frames), `review.py` (email review state machine), `web_session.py` (the one shared Session). Put a change in the module that owns it, not in `server.py`. Start with `python -m agents.web.server` or press `[W]` in main menu.
 - Port 8765 (default). If port is busy, kill existing process or change port in `server.py`.
-- Static files in `agents/web/static/`: `index.html`, `style.css`, `app.js`. Two-pane agent-office: living pixel floor LEFT, command center (chat/agents/skills tabs) RIGHT (~65/35), roster strip along the bottom. Warm Ghibli pixel theme (cream/moss/wood) — NOT the old black/red cyberpunk. Bump `?v=N` on the css/js `<link>`/`<script>` in index.html when shipping asset changes, or browsers serve stale cached assets.
+- Static files in `agents/web/static/`: `index.html`, `style.css`, `app.js` (entry) + `js/` ES modules (`util.js` = esc + activity strip, `transitions.js` = vtAppend/vtSwap, `queue.js`, `attachments.js`, `voice.js`, `music.js`). `app.js` imports them directly — `<script type="module">`, still zero-build. Two-pane agent-office: living pixel floor LEFT, command center (chat/agents/skills tabs) RIGHT (~65/35), roster strip along the bottom. Warm Ghibli pixel theme (cream/moss/wood) — NOT the old black/red cyberpunk. Bump `?v=N` on the css/js `<link>`/`<script>` in index.html AND on every `import ... from './js/x.js?v=N'` in app.js when shipping asset changes — versioning only the entry leaves sub-imports on a stale cache (and an unversioned nested import like `js/util.js` loads a SECOND copy of the module).
+- Bumping asset URLs is NOT enough when index.html itself is cached: force a fresh document by navigating to `/?v=N` (query on the page URL), then confirm the served `?v=` via preview_evaluate before testing changes — a reload alone can keep serving the old HTML.
+- `/` and `/index.html` now send `Cache-Control: no-cache, must-revalidate` (before, the document had no cache header at all and `/index.html` 404'd). The document names the asset versions so it must never be cached; versioned `/static` assets stay cacheable. A browser holding a pre-header document can still look stale for one load.
+- **A `style=` attribute in index.html beats every rule in style.css.** A stray `style="display:none"` on `#statusPanel` made the status button permanently dead while `.status-panel.open { display: block }` was correct. If a panel won't show but its classes look right, grep index.html for `style="display` before touching CSS.
+- The QUEUE panel renders only from the server's `queue_state` frame and appears only while jobs actually overlap; `cancel_queued` is honoured only while an item is still `queued` (a stale click now gets a "no longer waiting" reply instead of silence).
+- The office UI is deliberately ZERO-BUILD vanilla JS (no package.json, React, or Tailwind). UI skills that require a Node toolchain (shadcn etc.) don't apply — adapt their patterns with native browser APIs instead of scaffolding a toolchain; user confirmed keeping it dependency-free.
+- Validate static JS with `node --check` over `agents/web/static/app.js` and every `agents/web/static/js/*.js` — there is no frontend build or test runner. Node 24's module detection lets `--check` accept the `import` syntax in app.js.
+- New clickable divs must use `makeActivatable()` in app.js (adds role=button, tabIndex, Enter/Space) or be real `<button>`s — an a11y audit found every clickable div was keyboard-unreachable.
+- Tab clicks sync `.is-active` AND `aria-selected` on `.tab` buttons in the same handler; the panes-only version (no button highlight) shipped broken for a long time — keep both in sync when touching tabs.
+- View transitions use native `document.startViewTransition` (`vtAppend`/`vtSwap` in app.js). DOM changes land in an async callback — reads right after triggering see the OLD state; wait ~400ms before asserting in live verification.
+- A global `prefers-reduced-motion` block at the end of style.css kills ALL animations/transitions — new decorative animations are covered automatically; don't add per-animation handling.
 - WebSocket endpoint at `/ws` for real-time chat. Sends JSON messages with `type` field (jarvis/thinking/progress/search_result/draft_result/send_result/research_result/error).
 - The chat UI uses Gemini for ALL intent parsing (not regex). Greetings and help are fast-pathed locally.
-- `chat_handler.py` is the CLI mode (menu `[C]`). Web UI goes through `web/server.py` WebSocket handler independently.
+- `chat_handler.py` is the CLI mode (menu `[C]`). Web UI goes through the `web/ws.py` socket handler independently — an inline action handled there (`GREETING`/`HELP`/`UNKNOWN`/`BRAINSTORM`/`REVIEW`/`LIST_SESSIONS`) never reaches the dispatch queue, so a message parsed to `[]` gets no reply at all (silent dead end — intent parsing is Gemini-first, so it varies between identical strings).
 - Business profile context flows into Gemini system prompt automatically.
 
 ## Cleanup Safety
@@ -80,7 +105,7 @@
 - Wants per-business file attachments and full email editing before send.
 - Wants JARVIS to research each business (Google reviews, what they're missing) and include insights in emails.
 - Prefers persistent memory across sessions — system should remember style and get smarter over time.
-- UI preference: black/red/white theme, animated, cyberpunk terminal aesthetic.
+- UI preference: warm Ghibli pixel office (approved; supersedes the earlier black/red cyberpunk ask). When asked to restyle, change the SKIN only — integration, queuing, dispatch, and server stay untouched ("make everything as it is").
 
 ## File Changes That Must Move Together
 
@@ -88,7 +113,10 @@
 - `chatbot.py` + `jarvis.py`: adding a new ActionType requires updating BOTH the pattern matching in chatbot AND the dispatch handler in jarvis.py.
 - `ai_design.py` + `medium.py`: changing email prompt structure requires updating BOTH agents (AI and template) to stay consistent.
 - `industry_learner.py` + `ai_design.py` + `medium.py`: industry context flows from learner → both email agents. All three must agree on the data format.
-- `chatbot.py` + `chat_handler.py` + `web/server.py`: all three parse user intent. If you change ActionType or add new actions, update ALL three (chatbot for parsing, chat_handler for CLI dispatch, web/server.py for WebSocket dispatch).
-- `event_bus.py` consumers: adding a new event `kind` requires updating `VALID_KINDS` in `event_bus.py` AND the `handleAgentEvent` switch in `web/static/app.js` (plus optional CSS).
-- `skills.py` ↔ `agent_team.py`: skills flow library → `skills_prompt()` into each agent's system prompt; the `learn_skill` tool writes back via `learn_skill()`. New agent keys must exist in BOTH `agent_team.py AGENTS` and the frontend maps (`BOT_HOME`, `BOT_LOOK`, `ROSTER_META` in `app.js`) or events render as a generic sprite at the brain.
-- `chat_memory.py`: used by both `chat_handler.py` (CLI) and `web/server.py` (WebSocket). Schema changes require both consumers to be updated.
+- `chatbot.py` + `chat_handler.py` + `agents/web/ws.py`: all three parse user intent. If you change ActionType or add new actions, update ALL three (chatbot for parsing, chat_handler for CLI dispatch, ws.py for WebSocket dispatch).
+- `event_bus.py` consumers: adding a new event `kind` requires updating `VALID_KINDS` in `event_bus.py`, the `handleAgentEvent` switch in `web/static/app.js` (plus optional CSS), and the activity-strip wrapper in `web/static/js/util.js` if the strip should narrate it. `app.js` installs that wrapper at init (`handleAgentEvent = wrapAgentEvent(handleAgentEvent, STATUS_TEXT)`) — the assignment must stay AFTER `STATUS_TEXT`'s `const`, or it hits the TDZ.
+- `skills.py` ↔ `agent_team.py`: skills flow library → `skills_prompt()` into each agent's system prompt; the `learn_skill` tool writes back via `learn_skill()`. A new roster member is DATA in `agent_team.py AGENTS` only (`name`/`role`/`look`/`station`) — no frontend edit: `app.js` keeps no roster of its own, it projects `/api/agents` into empty `BOT_HOME`/`LOOKS`/`ROSTER_META` maps, so a floor with fewer bots/cards than the API returns is a STALE DOCUMENT, not a missing map entry. Check the loaded `app.js?v=` before editing anything client-side.
+- `chat_memory.py`: used by both `chat_handler.py` (CLI) and `agents/web/ws.py` (WebSocket). Schema changes require both consumers to be updated.
+- `agents/web/review.py` persists approved drafts via its own `_finish`; `agents/web/web_session.py:current()` is the only place a `Session` is built for the web layer — the review flow, the API and the socket all read the same instance, so a change to "which session is active" belongs there.
+- Session attachments: a composer upload is stored as `__default__` in `agent_output/sessions/<id>/attachments.json` and silently rides EVERY future draft for that session — any playtest that attaches a file must delete that key (files land in `agent_output/uploads/`).
+- `Session.__init__` takes no arguments (`Session(session_id=...)` raises TypeError) and `load_data`/`save_data` no-op while `id is None`, so constructing a bare `Session()` for inspection has no side effects; use `.load(id, data)` to attach it.

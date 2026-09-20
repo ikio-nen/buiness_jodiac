@@ -6,7 +6,6 @@ No more brittle regex matching. Gemini has full session context.
 import json
 import random as _random
 import re
-import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
@@ -31,6 +30,7 @@ class ActionType(Enum):
     CHECKIN = "checkin"
     ASK_AGENT = "ask_agent"
     TEAM_ACT = "team_act"
+    CAMPAIGN = "campaign"
 
 
 @dataclass
@@ -96,7 +96,7 @@ _TOOLS = [
                         },
                         "category": {
                             "type": "string",
-                            "description": "What the user is looking for, in the user's OWN words, including qualifiers (e.g. 'educational centers that teach AutoCAD', 'schools', 'pharmacies near hospitals'). Do NOT collapse this to one word -- the filter reasons over the full phrase.",
+                            "description": "What the user is looking for, in the user's OWN words, INCLUDING their exclusions exactly as spoken (e.g. 'private computer academies that teach AutoCAD, remove schools and colleges', 'educational centers that teach AutoCAD but no schools'). Do NOT collapse this to one word, do NOT drop the 'remove X' part, and do NOT paraphrase or expand it with synonyms -- the filter reasons over the full phrase, and the exclusion half of it is binding.",
                         },
                         "radius": {
                             "type": "integer",
@@ -244,6 +244,32 @@ _TOOLS = [
                 },
             },
             {
+                "name": "start_campaign",
+                "description": "Run the full guided campaign for the user's niche and location: discover businesses, curate the 10 best, show an interactive checklist to approve, export an initial PDF, interview the user about each pick one by one, draft a unique email per business, send from the configured Gmail sender, and produce a final PDF report. Use when the user asks to run a campaign, launch the 6-stage flow, or says 'campaign in <location>'.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "City, town, or area to target (e.g. 'Bandel', 'Central Delhi')",
+                        },
+                        "category": {
+                            "type": "string",
+                            "description": "The user's niche request VERBATIM, including any 'no X' / 'remove X' / 'dont want X' exclusions exactly as spoken. Do NOT paraphrase, synonym-expand, or drop them.",
+                        },
+                        "radius": {
+                            "type": "integer",
+                            "description": "Search radius in meters. Default 2000.",
+                        },
+                        "goal": {
+                            "type": "string",
+                            "description": "What the user is SELLING on this campaign, in a few words - e.g. 'AutoCAD licences'. Omit only when they never say.",
+                        },
+                    },
+                    "required": ["location"],
+                },
+            },
+            {
                 "name": "team_act",
                 "description": "Put the whole specialist team to work on the current prospects: Scout researches the top ones, Strategist pre-writes opening hooks, Analyst debriefs. Use when the user says things like 'team act', 'put the team on it', 'have the team research them'.",
                 "parameters": {
@@ -312,7 +338,21 @@ def parse_intents(user_input: str, context: list[dict] = None,
     if lower in CHECKIN_TRIGGERS or any(lower.startswith(t) for t in CHECKIN_TRIGGERS):
         return [Action(type=ActionType.CHECKIN, response="Scanning everything I know...")]
 
-    # Quick "talk to a specialist" triggers (no API call)
+    # Quick "talk to a specialist" triggers (no API call) — resolves through
+    # the roster interface so hired agents answer 'ask <name>' too.
+    if lower.startswith("ask "):
+        try:
+            from agents.agent_team import get_agent
+            rest = text[4:].strip()
+            who = rest.split(" ", 1)[0].lower().strip(":,-")
+            if who and get_agent(who):
+                msg = rest[len(who):].strip(" :,-") \
+                    or "Introduce yourself and what you can help with."
+                return [Action(type=ActionType.ASK_AGENT,
+                               params={"agent": who, "message": msg},
+                               response=f"Looping in {who.capitalize()}...")]
+        except Exception:
+            pass
     for agent_key in ("scout", "strategist", "analyst"):
         if lower.startswith(f"ask {agent_key}"):
             msg = text[len(f"ask {agent_key}"):].strip(" :,-") \
@@ -386,92 +426,48 @@ def _parse_with_gemini(user_input: str, context: list[dict] = None,
         # Add current message
         contents.append({"role": "user", "parts": [{"text": user_input}]})
 
-        from agents.ai_engine import _get_client
-        from google.genai import types
-
-        client = _get_client()
-        if not client:
+        # One call through the seam: the client, the model, the quota-aware
+        # retry policy and the function-call protocol all live in agents/ai.
+        # This module owns only the policy -- which tool means which Action.
+        from agents.ai import service as ai
+        turn = ai.converse("intent_parse", contents=contents, system=system,
+                           tools=_TOOLS, temperature=0.3, max_rounds=1)
+        if not turn.available:
             return [Action(
                 type=ActionType.UNKNOWN,
                 response="AI client not available. Check your Gemini API key."
             )]
 
-        from agents.config import get_ai_model
-        model = get_ai_model()
+        # Every function call the model emitted becomes an Action, in order.
+        if turn.calls:
+            for call in turn.calls:
+                emit(_handle_function_call(call.name, call.args, user_input))
 
-        # Quota-proof call: free-tier 429s carry a retryDelay ("Please retry
-        # in 18s"); honor it instead of degrading to "I'm not sure what you
-        # mean" mid-conversation.
-        response = None
-        for attempt in range(3):
-            try:
-                response = client.models.generate_content(
-                    model=model,
-                    contents=contents,
-                    config=types.GenerateContentConfig(
-                        system_instruction=system,
-                        tools=_TOOLS,
-                        temperature=0.3,
-                    ),
-                )
-                break
-            except Exception as e:
-                msg = str(e)
-                # 429 quota hits carry a retryDelay; 5xx are the transient
-                # blips Gemini throws under load -- both are retryable, and
-                # letting a 503 raise straight through turns into the
-                # misleading "I'm not sure what you mean" card.
-                if "429" in msg or "RESOURCE_EXHAUSTED" in msg:
-                    import re as _re
-                    wait = 0
-                    m = _re.search(r"retry in (\d+)s", msg, _re.I)
-                    if m:
-                        wait = int(m.group(1)) + 1
-                    wait = min(wait or (6 * (attempt + 1)), 25)
-                    if attempt < 2:
-                        print(f"  [AI] Quota hit — waiting {wait}s before retry")
-                        time.sleep(wait)
-                        continue
-                elif any(code in msg for code in ("503", "500", "UNAVAILABLE", "DEADLINE_EXCEEDED")):
-                    if attempt < 2:
-                        wait = 1.5 * (attempt + 1)
-                        print(f"  [AI] Server blip ({msg[:60]}) — retrying in {wait:.0f}s")
-                        time.sleep(wait)
-                        continue
-                raise
+            # Chain supplement: if the user asked for a step that Gemini
+            # didn't emit, append its logical follow-up. Only steps the
+            # user explicitly named are supplemented -- and only safe
+            # (non-SEND) actions.
+            requested = _requested_steps(user_input)
+            for act in list(collect):
+                current = act.type
+                while True:
+                    nxt = _NEXT_STEP.get(current)
+                    if (not nxt or nxt not in requested or nxt in seen
+                            or nxt not in _CHAINABLE):
+                        break
+                    nxt_action = _make_chain_action(nxt, user_input)
+                    if not nxt_action:
+                        break
+                    emit(nxt_action)
+                    current = nxt
+            return collect
 
-        # Parse function call response -- ALL parts, not just the first.
-        if response.candidates and response.candidates[0].content:
-            emitted_fc = False
-            for part in (response.candidates[0].content.parts or []):
-                if hasattr(part, "function_call") and part.function_call:
-                    emitted_fc = True
-                    emit(_handle_function_call(part.function_call, user_input))
+        # Text response (clarification or chat)
+        if turn.text:
+            return [Action(type=ActionType.UNKNOWN, response=turn.text)]
 
-            if emitted_fc:
-                # Chain supplement: if the user asked for a step that Gemini
-                # didn't emit, append its logical follow-up. Only steps the
-                # user explicitly named are supplemented -- and only safe
-                # (non-SEND) actions.
-                requested = _requested_steps(user_input)
-                for act in list(collect):
-                    current = act.type
-                    while True:
-                        nxt = _NEXT_STEP.get(current)
-                        if (not nxt or nxt not in requested or nxt in seen
-                                or nxt not in _CHAINABLE):
-                            break
-                        nxt_action = _make_chain_action(nxt, user_input)
-                        if not nxt_action:
-                            break
-                        emit(nxt_action)
-                        current = nxt
-                return collect
-
-            # Text response (clarification or chat)
-            part = response.candidates[0].content.parts[0] if response.candidates[0].content.parts else None
-            if part is not None and hasattr(part, "text") and part.text:
-                return [Action(type=ActionType.UNKNOWN, response=part.text)]
+        if turn.error:
+            print(f"  [AI] Intent parsing call failed: {turn.error_type} {turn.error[:120]}")
 
     except Exception as e:
         print(f"  [AI] Intent parsing error: {e}")
@@ -541,12 +537,15 @@ def _build_system_prompt(business_profile: dict = None,
     parts = [
         "You are JARVIS, an intelligent business outreach assistant.",
         "You understand natural language and can handle complex, multi-step requests.",
-        "You have access to these tools: search_businesses, draft_emails, send_emails, "
+        "You have access to these tools: start_campaign, search_businesses, draft_emails, send_emails, "
         "review_emails, research_businesses, sync_obsidian, scrape_websites, "
         "enrich_emails, show_status, show_help, show_dashboard, list_sessions, "
         "ask_specialist, ask_user.",
         "",
         "Rules:",
+        "- If the user asks for the full guided flow (run a campaign, the 6-stage "
+        "flow, 'campaign in <location>'), use start_campaign - it runs discovery "
+        "through the final report with the user approving at each gate.",
         "- Always use a function call unless the user is just chatting.",
         "- If the user asks for MORE THAN ONE thing in one message (e.g. 'find "
         "emails for them and draft an email for each'), call EVERY tool the "
@@ -555,6 +554,12 @@ def _build_system_prompt(business_profile: dict = None,
         "- For complex requests like 'find schools and draft emails', use "
         "search_businesses first, then draft_emails in the same response.",
         "- If the user mentions a location, extract it for search_businesses.",
+        "- For search_businesses AND start_campaign, the `category` param is the user's "
+        "request VERBATIM (e.g. 'private computer academies that teach autocad, remove "
+        "schools and cllgs', 'training centers no colleges'). NEVER paraphrase, "
+        "synonym-expand, or drop the exclusion half ('no X', 'remove X', 'dont want X') "
+        "-- the pipeline parses exclusions out of their exact words and dropping them "
+        "resurrects the kinds of business the user just banned.",
         "- The user's goal changes between searches: websites today, AutoCAD licences tomorrow. "
         "Pass what they are selling now as `goal`. If they never say, leave it out and the "
         "system falls back to their saved product.",
@@ -611,40 +616,29 @@ def _build_system_prompt(business_profile: dict = None,
     return "\n".join(parts)
 
 
-def _handle_function_call(function_call, user_input: str) -> Action:
-    """Map Gemini function call to an Action."""
-    name = function_call.name
-    args = dict(function_call.args) if function_call.args else {}
-
-    action_map = {
-        "search_businesses": (ActionType.SEARCH, _build_search_response),
-        "draft_emails": (ActionType.DRAFT, lambda a: "Drafting personalized emails..."),
-        "send_emails": (ActionType.SEND, lambda a: "Sending emails now..."),
-        "review_emails": (ActionType.REVIEW, lambda a: "Opening email review..."),
-        "research_businesses": (ActionType.RESEARCH, lambda a: "Researching businesses with AI..."),
-        "sync_obsidian": (ActionType.SYNC, lambda a: "Syncing to Obsidian vault..."),
-        "scrape_websites": (ActionType.SCRAPE, lambda a: "Scraping business websites..."),
-        "enrich_emails": (ActionType.ENRICH, lambda a: "Looking up email addresses..."),
-        "show_status": (ActionType.STATUS, lambda a: "Here's where things stand..."),
-        "show_help": (ActionType.HELP, lambda a: ""),
-        "show_dashboard": (ActionType.DASHBOARD, lambda a: "Loading learning dashboard..."),
-        "agent_check_in": (ActionType.CHECKIN, lambda a: "Scanning everything I know..."),
-        "ask_specialist": (ActionType.ASK_AGENT, lambda a: "Looping in a specialist..."),
-        "team_act": (ActionType.TEAM_ACT, lambda a: "Putting the team to work..."),
-        "list_sessions": (ActionType.LIST_SESSIONS, lambda a: "Here are your sessions..."),
-        "ask_user": (_ask_user_action, None),
-    }
+def _handle_function_call(name: str, args: dict, user_input: str) -> Action:
+    """Map one function call (name + args off the seam) to an Action."""
+    args = dict(args or {})
 
     if name == "ask_user":
         return _ask_user_action(args)
 
-    if name in action_map:
-        action_type, response_fn = action_map[name]
-        return Action(
-            type=action_type,
-            params=args,
-            response=response_fn(args),
-        )
+    # The action registry is the single source of truth for the mapping
+    # (gemini function name -> ActionType -> ack). SEARCH's ack is built
+    # dynamically from its args.
+    from agents.action_registry import row_for_gemini
+    row = row_for_gemini(name)
+    if row:
+        response = _build_search_response(args) if row.action == ActionType.SEARCH else row.ack
+        return Action(type=row.action, params=args, response=response)
+
+    if name == "show_help":
+        return Action(type=ActionType.HELP, params=args, response="")
+
+    if name == "start_campaign":
+        return Action(type=ActionType.CAMPAIGN, params=args,
+                      response="Starting guided campaign: discovery, curation, "
+                               "and your approval checklist...")
 
     return Action(type=ActionType.UNKNOWN, response=f"Unknown action: {name}")
 

@@ -12,18 +12,27 @@ except Exception as e:
     results['imports'] = f'FAIL: {e}'
 
 # 2. Session create/load/save
+# The session this check creates is DELETED before the run ends: it is the
+# newest session on disk while it exists, and the web layer resumes the newest
+# one, so leaving it behind silently switched the office to an empty session
+# and made a finished search look like it had found nothing.
+sid_session = None
 try:
     from agents.session import Session, list_sessions
     s = Session()
-    sid = s.create('audit_test_v2')
+    sid_session = s.create('audit_test_v2')
     s.save_data({'biz': [{'name': 'TestCo'}]}, 'businesses.json')
     data = s.load_data('businesses.json')
     assert data['biz'][0]['name'] == 'TestCo'
     sessions = list_sessions()
-    assert any(x['id'] == sid for x in sessions)
+    assert any(x['id'] == sid_session for x in sessions)
     results['session'] = 'OK'
 except Exception as e:
     results['session'] = f'FAIL: {e}'
+finally:
+    if sid_session:
+        shutil.rmtree(os.path.join('F:/jodiac/agent_output/sessions', sid_session),
+                      ignore_errors=True)
 
 # 3. Map search + filter
 try:

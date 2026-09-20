@@ -362,6 +362,27 @@ def learn_from_search(businesses: list[dict], location: str):
     kb.update_location(location, len(businesses), no_site, list(categories))
 
 
+def suggest_refined_query(seed_query: str, businesses: list[dict],
+                          goal_label: str = "") -> str:
+    """Optional AI assist: what should we search for NEXT?
+
+    Wraps the Gemini seam's expand_query with what this batch taught us.
+    Returns '' when the AI is unavailable — the calling loop simply works
+    without it (PRD §4.5: the loop must not depend on the assist).
+    """
+    try:
+        from agents.ai import service as ai_service
+        fits = [b.get("category", "?") for b in businesses if (b.get("icp") or {}).get("fit") == "fits"]
+        junk = [b.get("category", "?") for b in businesses if (b.get("icp") or {}).get("fit") == "unlikely"]
+        learnings = [f"goal: {goal_label or 'n/a'}",
+                     f"categories that fit: {', '.join(sorted(set(fits))[:6]) or 'none'}",
+                     f"categories to avoid: {', '.join(sorted(set(junk))[:6]) or 'none'}"]
+        out = ai_service.expand_query(seed_query, learnings)
+        return (out.queries or [""])[0] if out.source == "gemini" else ""
+    except Exception:
+        return ""
+
+
 def learn_from_draft(category: str, subject: str, body: str):
     """Learn that a draft was created (not yet sent)."""
     kb = get_kb()

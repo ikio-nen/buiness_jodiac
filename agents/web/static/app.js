@@ -4,6 +4,22 @@
    skills). Bottom: roster strip. Warm Ghibli theme, no lanes.
    ═══════════════════════════════════════════════════════════════ */
 
+// This module is the office itself: the socket, the chat, the floor and
+// the roster. The subsystems that own their own state live beside it as
+// ES modules (no build step) - the activity strip, view transitions, the
+// QUEUE panel, composer attachments, dictation, and the music corner.
+// The ?v= on each import is the same version as the document's app.js
+// tag: bump both together or a browser keeps serving an old module.
+import { esc, setActivity, clearActivityIfIdle, showQueuedChip, setWorkActive,
+         wrapAgentEvent } from './js/util.js?v=28';
+import { vtAppend, vtSwap } from './js/transitions.js?v=28';
+import { initQueue, renderQueue } from './js/queue.js?v=28';
+import { initAttachments, takeAttachment } from './js/attachments.js?v=28';
+import { initDictation } from './js/voice.js?v=28';
+import { initMusicCorner } from './js/music.js?v=28';
+import { renderChecklist, renderInterview, removeChecklistCard } from './js/campaign.js?v=28';
+
+
 // ── WebSocket Connection ─────────────────────────────────────────
 
 const WS_URL = `ws://${location.host}/ws`;
@@ -41,13 +57,32 @@ function connect() {
   ws.onmessage = (event) => handleMessage(JSON.parse(event.data));
 }
 
+// One way for a panel to put a frame on the wire without owning the
+// socket: the connection decides whether it is live, the panel just asks.
+// Exposed for ES modules (campaign.js checklist) that render outside this
+// module but must send through the same connection.
+function sendFrame(obj) {
+  if (ws && connected) ws.send(JSON.stringify(obj));
+}
+window.wsSend = sendFrame;
+
 function handleMessage(data) {
   removeTypingIndicator();
 
   switch (data.type) {
     case 'jarvis':
-      addMessage('jarvis', data.content, data);
+      if (data.interview) {
+        renderInterview(data.content);
+      } else {
+        addMessage('jarvis', data.content, data);
+      }
       if (data.session_id) sessionInfo.textContent = data.session_id;
+      break;
+    case 'campaign_checklist':
+      renderChecklist(data.data);
+      break;
+    case 'campaign_end':
+      removeChecklistCard();
       break;
     case 'thinking': showTypingIndicator(); break;
     case 'queued': removeTypingIndicator(); showQueuedChip(data.message); break;
@@ -59,6 +94,7 @@ function handleMessage(data) {
     case 'review_show': renderReviewShow(data); break;
     case 'review_result': renderReviewResult(data.data); break;
     case 'agent_event': handleAgentEvent(data.event); break;
+    case 'queue_state': renderQueue(data.items); break;
     case 'agent_events_replay':
       (data.events || []).forEach(ev => handleAgentEvent(ev, true));
       break;
@@ -82,13 +118,32 @@ function addMessage(role, content, meta = {}) {
   body.className = 'msg-content';
   body.textContent = content;
 
+  // A report path in a jarvis message becomes a real link — the backend
+  // says "click to download", so the click must actually work.
+  if (role !== 'user') {
+    const rm = String(content).match(/reports[\\/]campaign_(initial|final)_[A-Za-z0-9_]+\.pdf/i);
+    if (rm) {
+      const [full, which] = rm;
+      const parts = String(content).split(full);
+      body.textContent = '';
+      body.append(parts[0]);
+      const a = document.createElement('a');
+      a.href = `/api/report/${which}`;
+      a.className = 'msg-file-link';
+      a.textContent = `campaign_${which} report (PDF)`;
+      body.append(a);
+      body.append(parts.slice(1).join(full));
+    }
+  }
+
   if (meta.error) body.classList.add('is-error');
 
   msg.appendChild(label);
   msg.appendChild(body);
-  messagesEl.appendChild(msg);
+  vtAppend(messagesEl, msg);
   scrollToBottom();
 }
+
 
 function addSystemMessage(text) {
   const msg = document.createElement('div');
@@ -142,63 +197,24 @@ function removeTypingIndicator() {
   if (el) el.remove();
 }
 
-// ── Live activity strip ──────────────────────────────────────────
-// A single line under the composer that mirrors what the office is
-// doing RIGHT NOW — agent events, pipeline steps, queued jobs — so
-// the user never wonders whether anything is happening.
-
-function activityStrip() { return document.getElementById('activityStrip'); }
-
-function setActivity(text, cls = '') {
-  const el = activityStrip();
-  if (!el) return;
-  el.textContent = text;
-  el.className = 'activity-strip ' + cls;
-  el.classList.toggle('busy', cls === 'busy');
-}
-
-function clearActivityIfIdle() {
-  setActivity('office idle — run a search or “team act”');
-}
-
-function showQueuedChip(text) {
-  setActivity('⏳ ' + (text || 'queued — will run after the current job'), 'busy');
-}
-
-// Keep the strip fed from every event source the app already has:
-let _idleTimer = null;
-function _armIdleDecay() {
-  // After a finished job and 7 quiet seconds, the office is idle again.
-  clearTimeout(_idleTimer);
-  _idleTimer = setTimeout(() => {
-    const el = activityStrip();
-    if (el && el.classList.contains('busy')) clearActivityIfIdle();
-  }, 7000);
-}
-const _origHandleAgentEvent = handleAgentEvent;
-handleAgentEvent = function (ev, silent = false) {
-  _origHandleAgentEvent(ev, silent);
-  if (!ev || !ev.kind) return;
-  if (ev.kind === 'bot') {
-    const who = (ev.bot || 'agent').toUpperCase();
-    const what = ev.task ? ` — ${String(ev.task).slice(0, 60)}` : '';
-    setActivity(`${who} ${STATUS_TEXT[ev.status] || ev.status || 'working'}${what}`, 'busy');
-    if (ev.status === 'done' || ev.status === 'error') _armIdleDecay();
-    else clearTimeout(_idleTimer);
-  } else if (ev.kind === 'packet') {
-    setActivity(`✉ ${ev.from_ || '?'} → ${ev.to || '?'}${ev.label ? ' — ' + ev.label : ''}`, 'busy');
-    clearTimeout(_idleTimer);
-  } else if (ev.kind === 'brain') {
-    setActivity('🧠 brain ' + (ev.action || 'updated'), 'busy');
-    _armIdleDecay();
-  } else if (ev.kind === 'step') {
-    setActivity(String(ev.message || ev.label || ev.phase || 'working…'), 'busy');
-    clearTimeout(_idleTimer);
-  }
-};
 
 function scrollToBottom() {
   messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+// Clickable divs (roster cards, conversations, agent heads, bots) get
+// button semantics + Enter/Space activation so keyboard users can reach
+// everything a mouse can.
+function makeActivatable(el) {
+  if (!el) return;
+  el.setAttribute('role', 'button');
+  el.tabIndex = 0;
+  el.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      el.click();
+    }
+  });
 }
 
 // ── Data Renderers ───────────────────────────────────────────────
@@ -286,15 +302,10 @@ function appendCard(html) {
   const msg = document.createElement('div');
   msg.className = 'message message-jarvis';
   msg.innerHTML = `<div class="msg-label">JARVIS</div>${html}`;
-  messagesEl.appendChild(msg);
+  vtAppend(messagesEl, msg);
   scrollToBottom();
 }
 
-function esc(s) {
-  const d = document.createElement('div');
-  d.textContent = s || '';
-  return d.innerHTML;
-}
 
 // ═══════════════════════════════════════════════════════════════
 //  THE OFFICE — agents as pixel people at their work zones.
@@ -309,35 +320,120 @@ const opsRoster = document.getElementById('opsRoster');
 const botsLayer = document.getElementById('botsLayer');
 const packetsLayer = document.getElementById('packetsLayer');
 
-// Home zone per agent (furniture they idle at)
-const BOT_HOME = {
-  scout: 'station-scout',
-  strategist: 'station-strategist',
-  analyst: 'station-analyst',
-  librarian: 'station-brain',
-  mailer: 'station-mailer',
-  jarvis: 'station-brain',
+// Desk slots for runtime hires (station-hired-0..7) — CSS positions them in
+// open floor areas; hiring.py assigns the slot, the API reports it, and
+// deriveRosterFromApi points BOT_HOME at it.
+function ensureHiredStations() {
+  const stage = document.getElementById('opsStage');
+  if (!stage) return;
+  for (let i = 0; i < 8; i++) {
+    const id = `station-hired-${i}`;
+    if (document.getElementById(id)) continue;
+    const st = document.createElement('div');
+    st.className = 'station station-hired';
+    st.id = id;
+    st.title = 'Hired specialist desk';
+    st.innerHTML = '<div class="fur fur-desk"><span class="desk"></span><span class="mon"><i></i></span><span class="chair"></span></div>' +
+      `<div class="zone-label">DESK ${i + 1}</div>`;
+    stage.appendChild(st);
+  }
+}
+ensureHiredStations();
+
+// ── Roster state: projected from /api/agents, never declared here ────
+// An agent's identity — name, role, avatar look, desk — is owned by the
+// server (`agent_team.AGENTS`) and published by /api/agents as ONE record
+// shape for built-ins and hires alike. The client keeps no roster of its
+// own: that duplication is exactly what let the floor drift from the API.
+// These three maps are projections of that response, written only by
+// deriveRosterFromApi() at init. Anywhere a station is needed, callers fall
+// back to 'station-brain', so an unknown key still routes somewhere real.
+const BOT_HOME = {};     // key -> floor station id
+const LOOKS = {};        // key -> avatar look (skin/hair/hairStyle/shirt/accessory)
+const ROSTER_META = {};  // key -> { label, role } for the roster strip
+
+// ── The pixel cast ────────────────────────────────────────────────
+// One look schema, one renderer. Every avatar in the office (floor bot,
+// roster card, agent pane, command center) comes from spriteHTML(), so a
+// detail added here appears everywhere at once.
+//   skin      face tone      hair       hair colour
+//   hairStyle short|buzz|bob|long|bun|curly|bald
+//   shirt     top colour     accessory  none|glasses|headset|cap|tie
+//
+// The looks for real agents are NOT declared here — the roster serves each
+// agent its own (see the ROSTER state above). DEFAULT_LOOK is only the
+// fallback so an unrecognised key still draws a person rather than a hole.
+const DEFAULT_LOOK = {
+  skin: '#f0c9a0', hair: '#2b2b33', hairStyle: 'short',
+  shirt: '#8a8172', accessory: 'none', accColor: '',
 };
 
-// Pixel-person look: hair + shirt colors (original palette)
-const BOT_LOOK = {
-  scout:      { hair: '#2b2b33', shirt: '#4e8f7d' },
-  strategist: { hair: '#4a2c17', shirt: '#c1666b' },
-  analyst:    { hair: '#111114', shirt: '#d9a441' },
-  librarian:  { hair: '#5a5a66', shirt: '#8e6fa8' },
-  mailer:     { hair: '#3a2a1a', shirt: '#6f9e58' },
-  jarvis:     { hair: '#c0c0c8', shirt: '#c1666b' },
-  agent:      { hair: '#2b2b33', shirt: '#8a8172' },
-  unknown:    { hair: '#2b2b33', shirt: '#8a8172' },
-};
+// JARVIS is the app's own interlocutor, not a roster member, so its look is
+// chrome and belongs with the chrome.
+const JARVIS_LOOK = { skin: '#e8c39a', hair: '#c0c0c8', hairStyle: 'short',
+                      shirt: '#c1666b', accessory: 'headset' };
+LOOKS.jarvis = JARVIS_LOOK;
 
-const ROSTER_META = {
-  scout:      { label: 'SCOUT',      role: 'lead hunter' },
-  strategist: { label: 'STRATEGIST', role: 'outreach tactician' },
-  analyst:    { label: 'ANALYST',    role: 'numbers' },
-  librarian:  { label: 'LIBRARIAN',  role: 'brain keeper' },
-  mailer:     { label: 'MAILER',     role: 'sends the mail' },
-};
+function spriteHTML(key) {
+  const look = { ...DEFAULT_LOOK, ...(LOOKS[key] || {}) };
+  const acc = look.accessory && look.accessory !== 'none' ? look.accessory : '';
+  const capStyle = look.accColor ? ` style="background:${look.accColor}"` : '';
+  return `<div class="sprite" data-hair="${look.hairStyle}">` +
+    `<div class="sp-hair" style="background:${look.hair}"></div>` +
+    `<div class="sp-face" style="background:${look.skin}">` +
+      (acc === 'glasses' ? `<span class="sp-glasses"><i></i><i></i></span>` : '') +
+    `</div>` +
+    `<div class="sp-body" style="background:${look.shirt}">` +
+      `<span class="sp-badge"></span>` +
+      (acc === 'tie' ? `<span class="sp-tie"></span>` : '') +
+    `</div>` +
+    `<div class="sp-legs"><i></i><i></i></div>` +
+    (acc === 'cap' ? `<span class="sp-cap"${capStyle}></span>` : '') +
+    (acc === 'headset' ? `<span class="sp-headset"></span>` : '') +
+    `</div>`;
+}
+
+// Compact avatar (roster card, agent pane, command center): the same figure,
+// scaled down by CSS — no second set of sprite rules to keep in sync.
+const _cmdAva = document.getElementById('cmdAva');
+if (_cmdAva) _cmdAva.innerHTML = spriteHTML('jarvis');
+
+// The one merge point: everything the floor, the roster strip and the agent
+// pane know about an agent arrives here. Nothing else may write these maps.
+function deriveRosterFromApi(agents) {
+  (agents || []).forEach(a => {
+    if (!a || !a.key) return;
+    BOT_HOME[a.key] = a.home_station || 'station-brain';
+    if (a.look) LOOKS[a.key] = a.look;
+    ROSTER_META[a.key] = {
+      label: String(a.name || a.key).toUpperCase(),
+      role: a.role || 'specialist',
+    };
+  });
+}
+
+async function loadRosterAndSpawn() {
+  // The floor renders the roster the server hands it — built-ins and hires in
+  // one list, each carrying its own look and desk. If the roster cannot be
+  // fetched the floor simply stays empty rather than inventing agents that
+  // may not exist; the chat connection is independent and keeps working.
+  let keys = [];
+  try {
+    const res = await fetch('/api/agents');
+    const data = await res.json();
+    if (data && data.agents) {
+      deriveRosterFromApi(data.agents);
+      keys = data.agents.map(a => a.key).filter(Boolean);
+    }
+  } catch (e) {
+    console.warn('roster fetch failed — floor not populated', e);
+  }
+  buildRoster();
+  keys.forEach((k, i) => {
+    if (k === 'jarvis') return;
+    setTimeout(() => getBot(k), i * 160);
+  });
+}
 
 const bots = {};        // botName -> {el, bubbleEl, bubbleTimer}
 const stationBusy = {}; // stationId -> timeout handle
@@ -364,16 +460,9 @@ function getBot(name) {
   el.dataset.bot = name;
   el.title = name;
   el.addEventListener('click', () => openAgentPane(name === 'jarvis' ? null : name));
+  makeActivatable(el);
 
-  const look = BOT_LOOK[name] || BOT_LOOK.agent;
-  const sprite = document.createElement('div');
-  sprite.className = 'sprite';
-  sprite.innerHTML =
-    `<div class="sp-hair" style="background:${look.hair}"></div>` +
-    `<div class="sp-face"></div>` +
-    `<div class="sp-body" style="background:${look.shirt}"></div>` +
-    `<div class="sp-legs"><i></i><i></i></div>`;
-  el.appendChild(sprite);
+  el.innerHTML = spriteHTML(name);
 
   const tag = document.createElement('div');
   tag.className = 'bot-tag';
@@ -509,23 +598,40 @@ function botStation(botName) {
 
 function buildRoster() {
   if (!opsRoster) return;
+  opsRoster.innerHTML = '';   // derived maps may have grown hires — rebuild clean
   Object.keys(ROSTER_META).forEach(name => {
     const meta = ROSTER_META[name];
-    const look = BOT_LOOK[name] || BOT_LOOK.agent;
     const card = document.createElement('div');
     card.className = 'roster-card';
     card.addEventListener('click', () => openAgentPane(name));
+    makeActivatable(card);
     card.innerHTML =
-      `<div class="roster-ava">` +
-      `<div class="sp-hair" style="background:${look.hair}"></div>` +
-      `<div class="sp-face"></div>` +
-      `<div class="sp-body" style="background:${look.shirt}"></div>` +
-      `</div>` +
-      `<div><div class="roster-name">${meta.label}</div>` +
-      `<div class="roster-role">${meta.role}</div></div>` +
-      `<span class="roster-msgs">0</span>`;
+      `<span class="roster-ava">${spriteHTML(name)}</span>` +
+      `<div class="roster-meta">` +
+        `<div class="roster-row">` +
+          `<span class="roster-name">${esc(meta.label)}</span>` +
+          `<span class="roster-state" data-state="idle">idle</span>` +
+        `</div>` +
+        `<div class="roster-role">${esc(meta.role)}</div>` +
+        `<div class="roster-bar" aria-hidden="true"><i></i></div>` +
+      `</div>`;
     opsRoster.appendChild(card);
-    rosterCards[name] = { card, msgsEl: card.querySelector('.roster-msgs'), msgs: 0, activeTimer: null };
+    rosterCards[name] = {
+      card, msgs: 0, activeTimer: null,
+      stateEl: card.querySelector('.roster-state'),
+      barEl: card.querySelector('.roster-bar i'),
+    };
+  });
+  updateRosterBars();
+}
+
+// The bar shows each agent's share of the work actually seen this session —
+// a real ratio, not a decorative animation.
+function updateRosterBars() {
+  const counts = Object.values(rosterCards).map(rc => rc.msgs);
+  const max = Math.max(1, ...counts);
+  Object.values(rosterCards).forEach(rc => {
+    if (rc.barEl) rc.barEl.style.width = Math.round(rc.msgs / max * 100) + '%';
   });
 }
 
@@ -534,15 +640,26 @@ function rosterPing(name, state, countMsg = true) {
   if (!rc) return;
   if (countMsg) {
     rc.msgs += 1;
-    rc.msgsEl.textContent = rc.msgs;
+    updateRosterBars();
   }
   rc.card.classList.remove('active', 'done', 'error');
   if (state === 'error') rc.card.classList.add('error');
   else if (state === 'done') rc.card.classList.add('done');
   else if (state) rc.card.classList.add('active');
+  if (rc.stateEl) {
+    rc.stateEl.dataset.state = state === 'error' ? 'error'
+      : state === 'done' ? 'done'
+      : state ? 'working' : 'idle';
+    rc.stateEl.textContent = state === 'error' ? 'error'
+      : state === 'done' ? 'done'
+      : state ? 'working' : 'idle';
+  }
+  rc.card.title = `${rc.msgs} office event${rc.msgs === 1 ? '' : 's'} this session`;
   clearTimeout(rc.activeTimer);
-  rc.activeTimer = setTimeout(() => rc.card.classList.remove('active', 'done', 'error'),
-                              state === 'error' ? 1200 : 2500);
+  rc.activeTimer = setTimeout(() => {
+    rc.card.classList.remove('active', 'done', 'error');
+    if (rc.stateEl) { rc.stateEl.dataset.state = 'idle'; rc.stateEl.textContent = 'idle'; }
+  }, state === 'error' ? 1200 : 2500);
 }
 
 // Packet: a little envelope hops from one zone to another (no lanes)
@@ -630,16 +747,16 @@ function handleAgentEvent(ev, silent = false) {
       `${esc(STATUS_TEXT[status] || status)} — ${esc(ev.task || '')}`, cls);
 
   } else if (ev.kind === 'packet') {
-    const fromStation = ev.from_ === 'pipeline' ? 'station-scout'
-      : ev.from_ === 'search' ? 'station-scraper'
-      : BOT_HOME[ev.from_] || 'station-brain';
-    const toStation = ev.to === 'brain' ? 'station-brain'
-      : ev.to === 'drafts' ? 'station-drafts'
-      : ev.to === 'sent' ? 'station-sent'
-      : ev.to === 'builder' ? 'station-builder'
-      : ev.to === 'scraper' ? 'station-scraper'
-      : ev.to === 'enricher' ? 'station-enricher'
-      : BOT_HOME[ev.to] || 'station-brain';
+    // Packet endpoints are a mix: some are stages ('pipeline', 'drafts',
+    // 'sent'), some are roster keys. Stages own their own stations here;
+    // roster keys resolve through BOT_HOME so an agent's desk is never
+    // restated — and a hire animates to its real slot for free.
+    const STAGE_STATION = {
+      pipeline: 'station-scout', search: 'station-scraper',
+      brain: 'station-brain', drafts: 'station-drafts', sent: 'station-sent',
+    };
+    const fromStation = STAGE_STATION[ev.from_] || BOT_HOME[ev.from_] || 'station-brain';
+    const toStation = STAGE_STATION[ev.to] || BOT_HOME[ev.to] || 'station-brain';
     flyPacket(fromStation, toStation, ev.label || '');
     opsFeedLine('DATA', 'feed-chip-data',
       `${esc(ev.from_ || '?')} → ${esc(ev.to || '?')}${ev.label ? ' — ' + esc(ev.label) : ''}`);
@@ -692,11 +809,14 @@ setInterval(refreshOpsStats, 30000);
 
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('is-active'));
-    document.querySelectorAll('.tabpane').forEach(p => p.classList.remove('is-active'));
-    tab.classList.add('is-active');
-    const pane = document.querySelector(`.tabpane[data-pane="${tab.dataset.tab}"]`);
-    if (pane) pane.classList.add('is-active');
+    document.querySelectorAll('.tab').forEach(t => {
+      const on = t === tab;
+      t.classList.toggle('is-active', on);
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    const panes = [...document.querySelectorAll('.tabpane')];
+    const next = panes.find(p => p.dataset.pane === tab.dataset.tab);
+    vtSwap(next, panes);
     if (tab.dataset.tab === 'agents') loadAgentsPane();
     if (tab.dataset.tab === 'skills') loadSkillsPane();
   });
@@ -729,16 +849,13 @@ async function loadAgentsPane(focusKey = null) {
 
     pane.innerHTML = '';
     agents.forEach(a => {
-      const look = BOT_LOOK[a.key] || BOT_LOOK.agent;
       const mySkills = allSkillsCache.filter(s =>
         (s.agents || []).includes(a.key) || (s.agents || []).includes('*'));
       const card = document.createElement('div');
       card.className = 'agent-card' + (focusKey === a.key ? ' open' : '');
       card.innerHTML =
         `<div class="agent-card-head">` +
-        `<span class="roster-ava">` +
-        `<div class="sp-hair" style="background:${look.hair}"></div>` +
-        `<div class="sp-face"></div><div class="sp-body" style="background:${look.shirt}"></div></span>` +
+        `<span class="roster-ava">${spriteHTML(a.key)}</span>` +
         `<div><div class="agent-name">${esc(a.name.toUpperCase())}</div>` +
         `<div class="agent-role">${esc(a.role)}</div></div>` +
         `<span class="agent-meta">${a.memory || 0} memories · ${mySkills.length} skills</span>` +
@@ -763,6 +880,7 @@ async function loadAgentsPane(focusKey = null) {
 
     // interactions
     pane.querySelectorAll('.agent-card-head').forEach(h => {
+      makeActivatable(h);
       h.addEventListener('click', (e) => {
         if (e.target.closest('button')) return;
         const body = h.parentElement.querySelector('.agent-card-body');
@@ -939,16 +1057,19 @@ function renderReviewShow(data) {
   toBox.type = 'text';
   toBox.value = data.to || '';
   toBox.disabled = true;
+  toBox.setAttribute('aria-label', 'To');
   card.appendChild(makeField('To', toBox));
 
   const subjectBox = document.createElement('input');
   subjectBox.type = 'text';
   subjectBox.value = data.subject || '';
+  subjectBox.setAttribute('aria-label', 'Subject');
   card.appendChild(makeField('Subject', subjectBox));
 
   const bodyBox = document.createElement('textarea');
   bodyBox.rows = 10;
   bodyBox.value = data.body || '';
+  bodyBox.setAttribute('aria-label', 'Body');
   card.appendChild(makeField('Body', bodyBox));
 
   let uploadedPath = null;
@@ -961,6 +1082,7 @@ function renderReviewShow(data) {
   attControls.className = 'review-attach';
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
+  fileInput.setAttribute('aria-label', 'Attachment file');
   const attStatus = document.createElement('span');
   attStatus.className = 'review-att-status';
   attStatus.textContent = data.attachment_name ? `Current: ${data.attachment_name}` : '';
@@ -968,7 +1090,7 @@ function renderReviewShow(data) {
   fileInput.addEventListener('change', async () => {
     const f = fileInput.files && fileInput.files[0];
     if (!f) return;
-    attStatus.textContent = 'Uploading...';
+    attStatus.textContent = 'Uploading…';
     try {
       const fd = new FormData();
       fd.append('file', f);
@@ -1055,17 +1177,34 @@ function sendMessage() {
   if (!text) return;
 
   if (!connected) {
-    addSystemMessage('Not connected. Reconnecting...');
+    addSystemMessage('Not connected. Reconnecting…');
     return;
   }
 
+  // Action mode: with “ask first” on, anything that sends or destroys gets a
+  // confirmation step before it leaves the box.
+  if (!bypassOn && DESTRUCTIVE.test(text)) {
+    showConfirmBar(text, () => deliverMessage(text));
+    return;
+  }
+  deliverMessage(text);
+}
+
+function deliverMessage(text) {
   addMessage('user', text);
   inputHistory.unshift(text);
   if (inputHistory.length > 50) inputHistory.pop();
   historyIndex = -1;
 
-  ws.send(JSON.stringify({ content: text }));
+  const payload = { content: text };
+  const att = takeAttachment();   // one file never rides two messages
+  if (att) {
+    payload.attachment = att.path;
+    payload.attachment_name = att.name;
+  }
+  ws.send(JSON.stringify(payload));
   userInput.value = '';
+  hideConfirmBar();
   setActivity('JARVIS is thinking…', 'busy');
 }
 
@@ -1092,6 +1231,84 @@ userInput.addEventListener('keydown', (e) => {
 });
 
 sendBtn.addEventListener('click', sendMessage);
+
+
+
+// ── Action mode: run sending/delivery straight, or ask first ────
+const modeBtn = document.getElementById('modeBtn');
+let bypassOn = localStorage.getItem('jarvis.bypass') === '1';
+const DESTRUCTIVE = /\b(send|deliver|fire off|sync|cleanup|delete|remove)\b/i;
+
+function renderModeChip() {
+  if (!modeBtn) return;
+  modeBtn.setAttribute('aria-pressed', bypassOn ? 'true' : 'false');
+  modeBtn.textContent = bypassOn ? 'bypass on' : 'ask first';
+  modeBtn.title = bypassOn
+    ? 'On — sending and delivery actions run without asking first'
+    : 'Off — JARVIS asks before sending or deleting anything';
+}
+renderModeChip();
+
+function cycleMode() {
+  bypassOn = !bypassOn;
+  localStorage.setItem('jarvis.bypass', bypassOn ? '1' : '0');
+  renderModeChip();
+  setActivity(bypassOn
+    ? 'Bypass on — sending actions will run without asking.'
+    : 'Ask first — sending actions need a confirmation.', '');
+}
+
+if (modeBtn) modeBtn.addEventListener('click', cycleMode);
+
+// shift+tab cycles the mode from anywhere in the command center
+userInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Tab' && e.shiftKey) {
+    e.preventDefault();
+    cycleMode();
+  }
+});
+
+function showConfirmBar(text, onRun) {
+  hideConfirmBar();
+  const bar = document.createElement('div');
+  bar.className = 'confirm-bar';
+  bar.id = 'confirmBar';
+  bar.innerHTML =
+    `<span>Run “${esc(text)}”? This sends or changes real data.</span>` +
+    `<span class="confirm-acts">` +
+    `<button type="button" class="btn btn-primary" id="confirmRun">run</button>` +
+    `<button type="button" class="btn" id="confirmCancel">cancel</button></span>`;
+  document.querySelector('.composer').appendChild(bar);
+  document.getElementById('confirmRun').addEventListener('click', () => {
+    hideConfirmBar();
+    onRun();
+  });
+  document.getElementById('confirmCancel').addEventListener('click', hideConfirmBar);
+}
+
+function hideConfirmBar() {
+  const bar = document.getElementById('confirmBar');
+  if (bar) bar.remove();
+}
+
+// ── Context meter ────────────────────────────────────────────────
+// Estimated tokens for this conversation (characters ÷ 4). Labelled an
+// estimate in its tooltip rather than dressed up as exact accounting.
+const ctxChip = document.getElementById('ctxChip');
+function updateCtxChip() {
+  if (!ctxChip || !messagesEl) return;
+  const chars = messagesEl.textContent.length;
+  const tokens = Math.round(chars / 4);
+  ctxChip.textContent = tokens >= 1000
+    ? `ctx ${(tokens / 1000).toFixed(1)}k`
+    : `ctx ${tokens}`;
+}
+if (messagesEl && window.MutationObserver) {
+  new MutationObserver(updateCtxChip)
+    .observe(messagesEl, { childList: true, subtree: true, characterData: true });
+}
+updateCtxChip();
+
 
 // ── Quick Actions ────────────────────────────────────────────────
 
@@ -1120,8 +1337,10 @@ const closeSidebar = document.getElementById('closeSidebar');
 const convList = document.getElementById('conversationList');
 
 historyBtn.addEventListener('click', () => {
-  sidebar.classList.toggle('open');
-  loadHistory();
+  const opening = !sidebar.classList.contains('open');
+  vtSwap(opening ? sidebar : null, [sidebar]);
+  // Only refetch when actually opening; closing shouldn't re-render the list.
+  if (opening) loadHistory();
 });
 
 closeSidebar.addEventListener('click', () => sidebar.classList.remove('open'));
@@ -1133,12 +1352,41 @@ async function loadHistory() {
     if (data.conversations && data.conversations.length > 0) {
       convList.innerHTML = data.conversations.map(c => `
         <div class="conv-item" data-id="${c.id}">
-          <div class="conv-title">${esc(c.title)}</div>
-          <div class="conv-meta">${c.message_count} messages | ${c.started_at}</div>
+          <div class="conv-main">
+            <div class="conv-title">${esc(c.title)}</div>
+            <div class="conv-meta">${c.message_count} messages | ${c.started_at}</div>
+          </div>
+          <button class="conv-del" data-del="${c.id}" title="Delete conversation" aria-label="Delete conversation: ${esc(c.title)}">✕</button>
         </div>
       `).join('');
       convList.querySelectorAll('.conv-item').forEach(item => {
+        makeActivatable(item);
         item.addEventListener('click', () => loadConversation(item.dataset.id));
+      });
+      convList.querySelectorAll('.conv-del').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();   // don't load the conversation we're deleting
+          const id = btn.dataset.del;
+          if (!confirm('Delete this conversation? This cannot be undone.')) return;
+          btn.disabled = true;
+          try {
+            const res = await fetch(`/api/conversation/${id}`, { method: 'DELETE' });
+            const j = await res.json();
+            if (j.ok) {
+              const item = btn.closest('.conv-item');
+              if (item) item.remove();
+              if (!convList.querySelector('.conv-item')) {
+                convList.innerHTML = '<div class="sidebar-empty">No conversations yet</div>';
+              }
+            } else {
+              btn.disabled = false;
+              alert(j.error || 'Could not delete the conversation.');
+            }
+          } catch (err) {
+            btn.disabled = false;
+            alert('Delete failed — is the office server running?');
+          }
+        });
       });
     } else {
       convList.innerHTML = '<div class="sidebar-empty">No conversations yet</div>';
@@ -1168,8 +1416,12 @@ const closeStatus = document.getElementById('closeStatus');
 const statusContent = document.getElementById('statusContent');
 
 statusBtn.addEventListener('click', async () => {
-  statusPanel.classList.toggle('open');
-  if (statusPanel.classList.contains('open')) {
+  const opening = !statusPanel.classList.contains('open');
+  vtSwap(opening ? statusPanel : null, [statusPanel]);
+  // vtSwap applies classes in an async callback — never re-read the class
+  // here (it still holds the OLD value). Trust `opening` instead.
+  if (opening) {
+    statusContent.innerHTML = 'Loading…';
     try {
       const res = await fetch('/api/status');
       const data = await res.json();
@@ -1210,175 +1462,152 @@ function applyTimePhase() {
   const now = new Date();
   const phase = phaseForHour(now.getHours());
   document.documentElement.dataset.phase = phase;
-  const hh = String(now.getHours()).padStart(2, '0');
-  const mm = String(now.getMinutes()).padStart(2, '0');
   const clockText = document.getElementById('clockText');
   const clockIcon = document.getElementById('clockIcon');
-  if (clockText) clockText.textContent = `${hh}:${mm}`;
+  if (clockText) {
+    clockText.textContent = new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit', hour12: false }).format(now);
+  }
   if (clockIcon) clockIcon.textContent = PHASE_ICON[phase] || '☀';
 }
 applyTimePhase();
 setInterval(applyTimePhase, 30000);
 
-// ── Music corner ───────────────────────────────────────────────
-// A tiny generative lo-fi player: WebAudio synthesizes everything
-// live (no files, no streaming). Three stations, one engine.
-
-const MusicCorner = (() => {
-  let ctx = null;
-  let master = null;
-  let playing = false;
-  let station = 'lofi';
-  let schedulerTimer = null;
-  let nextTime = 0;   // when the next scheduled step plays (AudioContext time)
-  let step = 0;
-
-  const STATIONS = {
-    lofi:  { name: 'lo-fi office',   desc: 'warm tape hiss · soft keys',      bpm: 72,  root: 220, wave: 'triangle' },
-    rain:  { name: 'monsoon rain',   desc: 'filtered noise · far thunder',    bpm: 60,  root: 174, wave: 'sine' },
-    night: { name: 'midnight synth', desc: 'slow pads · deep pulse',          bpm: 50,  root: 130.8, wave: 'sawtooth' },
-  };
-
-  // Simple pentatonic palette per station — safe, always consonant.
-  const SCALES = {
-    lofi:  [0, 3, 5, 7, 10, 12],
-    rain:  [0, 2, 5, 7, 9, 12],
-    night: [0, 3, 7, 10, 12, 15],
-  };
-
-  function ensureCtx() {
-    if (ctx) return;
-    ctx = new (window.AudioContext || window.webkitAudioContext)();
-    master = ctx.createGain();
-    master.gain.value = (document.getElementById('musicVol')?.value || 35) / 100 * 0.5;
-    master.connect(ctx.destination);
-  }
-
-  function noteFreq(root, semis) { return root * Math.pow(2, semis / 12); }
-
-  function playTone(freq, t, dur, gainVal, type) {
-    const osc = ctx.createOscillator();
-    const g = ctx.createGain();
-    osc.type = type;
-    osc.frequency.value = freq;
-    g.gain.setValueAtTime(0, t);
-    g.gain.linearRampToValueAtTime(gainVal, t + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    osc.connect(g).connect(master);
-    osc.start(t); osc.stop(t + dur + 0.05);
-  }
-
-  function playNoise(t, dur, gainVal, filterFreq) {
-    const len = Math.max(1, Math.floor(ctx.sampleRate * dur));
-    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
-    const src = ctx.createBufferSource();
-    src.buffer = buf;
-    const filt = ctx.createBiquadFilter();
-    filt.type = 'lowpass';
-    filt.frequency.value = filterFreq;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(gainVal, t);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(filt).connect(g).connect(master);
-    src.start(t); src.stop(t + dur);
-  }
-
-  function scheduleStep(t) {
-    const st = STATIONS[station];
-    const scale = SCALES[station];
-    const beat = 60 / st.bpm;
-    // Bass every 4 steps, melody sparkle probabilistically, hats quietly.
-    if (step % 4 === 0) {
-      playTone(st.root / 2, t, beat * 3.4, 0.16, st.wave);
-    }
-    if (Math.random() < 0.62) {
-      const semi = scale[Math.floor(Math.random() * scale.length)];
-      playTone(noteFreq(st.root, semi + 12), t, beat * 1.1, 0.07, station === 'night' ? 'sine' : 'triangle');
-    }
-    if (station === 'rain') {
-      // Continuous-ish rain bed + occasional thunder rumble.
-      playNoise(t, beat * 0.9, 0.045, 1600);
-      if (Math.random() < 0.05) playNoise(t, beat * 4, 0.09, 220);
-    } else if (step % 2 === 1) {
-      playNoise(t, 0.05, 0.02, 6000); // soft hat
-    }
-    if (station === 'night' && step % 8 === 0) {
-      playTone(st.root / 4, t, beat * 7, 0.1, 'sine');
-    }
-    step++;
-  }
-
-  function scheduler() {
-    const st = STATIONS[station];
-    const beat = 60 / st.bpm;
-    if (!nextTime) nextTime = ctx.currentTime + 0.06;
-    // Look-ahead scheduling: fill the next 120ms with steps.
-    while (nextTime < ctx.currentTime + 0.12) {
-      scheduleStep(nextTime);
-      nextTime += beat / 2;
-    }
-  }
-
-  function start() {
-    ensureCtx();
-    if (ctx.state === 'suspended') ctx.resume();
-    playing = true;
-    nextTime = 0;
-    schedulerTimer = setInterval(scheduler, 90);
-    updateUI();
-  }
-
-  function stop() {
-    playing = false;
-    if (schedulerTimer) { clearInterval(schedulerTimer); schedulerTimer = null; }
-    updateUI();
-  }
-
-  function setStation(key) {
-    station = key;
-    step = 0;
-    updateUI();
-  }
-
-  function setVolume(v) {
-    if (master) master.gain.value = (v / 100) * 0.5;
-  }
-
-  function updateUI() {
-    const st = STATIONS[station];
-    document.getElementById('musicStation').textContent = st.name;
-    document.getElementById('musicDesc').textContent = st.desc;
-    const play = document.getElementById('musicPlay');
-    play.textContent = playing ? '⏸' : '▶';
-    document.getElementById('vinyl').classList.toggle('spin', playing);
-    document.querySelectorAll('.station-btn').forEach(b =>
-      b.classList.toggle('is-active', b.dataset.station === station));
-  }
-
-  // Wiring
-  document.getElementById('musicBtn')?.addEventListener('click', () =>
-    document.getElementById('musicCorner').classList.toggle('open'));
-  document.getElementById('closeMusic')?.addEventListener('click', () =>
-    document.getElementById('musicCorner').classList.remove('open'));
-  document.getElementById('musicPlay')?.addEventListener('click', () =>
-    playing ? stop() : start());
-  document.getElementById('musicVol')?.addEventListener('input', (e) => setVolume(+e.target.value));
-  document.querySelectorAll('.station-btn').forEach(b =>
-    b.addEventListener('click', () => setStation(b.dataset.station)));
-
-  return { start, stop, setStation };
-})();
 
 // ── Init ─────────────────────────────────────────────────────────
+
+// The panels that own their own state start here. Order matters: the
+// queue panel needs the socket before the first queue_state frame, and the
+// activity strip decorates the floor's handler before anything connects.
+initQueue({ send: sendFrame, onWork: setWorkActive });
+initAttachments({ setActivity });
+initDictation({ input: userInput, setActivity });
+initMusicCorner({ vtSwap });
+handleAgentEvent = wrapAgentEvent(handleAgentEvent, STATUS_TEXT);
 
 connect();
 addSystemMessage('J.A.R.V.I.S initialized. Type a command or use the buttons below.');
 clearActivityIfIdle();
-buildRoster();
-['scout', 'strategist', 'analyst', 'librarian', 'mailer'].forEach((n, i) => {
-  setTimeout(() => getBot(n), i * 160);
-});
+loadRosterAndSpawn();   // one truth: the API roster drives the floor
 loadAgentsPane();
 loadSkillsPane();
+
+// A campaign waiting on the user must survive a reload: re-render its gate
+// (checklist or interview question) instead of silently waiting on a card
+// that died with the old page.
+fetch('/api/campaign').then(r => r.json()).then(c => {
+  if (c.phase === 'awaiting_selection' && c.checklist) renderChecklist(c.checklist);
+  else if (c.phase === 'interview' && c.question) renderInterview(c.question);
+}).catch(() => {});
+
+
+// ── Splitter: floor ↔ command center resize ─────────────────────
+
+// The user drags the vertical grip (or focuses it and nudges with ←/→)
+// to change how the row splits between the office floor and the chat
+// panel. The ratio is stored in --floor-fr on .app (grid fr units) and
+// persisted to localStorage, so the split survives reloads. Desktop
+// widths only — the stacked layout hides the grip entirely.
+
+(function initSplitter() {
+  const appEl = document.querySelector('.app');
+  const grip = document.getElementById('splitGrip');
+  if (!appEl || !grip) return;
+
+  const KEY = 'jarvis.floorFr';
+  const MIN_PX = 22;        // px the grip must travel to count as a drag
+
+  // Restore the saved split (validated, then trusted as an fr value).
+  const saved = parseFloat(localStorage.getItem(KEY));
+  if (Number.isFinite(saved) && saved >= 0.2 && saved <= 6) {
+    appEl.style.setProperty('--floor-fr', saved);
+  }
+
+  // Synchronous write: the browser batches style recalc anyway, and the
+  // pointerup handler reads the value back immediately to persist it — a
+  // raf deferral here saved stale values (read-before-write race).
+  function setFloorFr(fr) {
+    const clamped = Math.min(6, Math.max(0.2, fr));
+    appEl.style.setProperty('--floor-fr', clamped);
+    return clamped;
+  }
+
+  function floorFrNow() {
+    // Inline style is the live truth during a drag; fall back to the saved
+    // split, then the designed default.
+    const inline = appEl.style.getPropertyValue('--floor-fr').trim();
+    if (inline) return parseFloat(inline) || 1.9;
+    const saved = parseFloat(localStorage.getItem(KEY));
+    if (Number.isFinite(saved) && saved >= 0.2 && saved <= 6) return saved;
+    return 1.9;
+  }
+
+  // True when the side-by-side grid (and therefore the grip) is active.
+  function sideBySide() {
+    return !window.matchMedia('(max-width: 900px)').matches;
+  }
+
+  function beginDrag(e) {
+    if (!sideBySide()) return;
+    e.preventDefault();
+    const startX = e.clientX;
+    const startFr = floorFrNow();
+    // clientWidth minus 10px padding each side minus the TWO 10px gaps the
+    // grip track sits between (floor|gap|0px-grip|gap|cmd).
+    const rowWidth = appEl.clientWidth - 20 - 20;
+    const perFr = rowWidth / (startFr + 1);
+    let moved = false;
+
+    document.body.classList.add('is-resizing');
+    grip.classList.add('is-active');
+    try {
+      grip.setPointerCapture(e.pointerId);
+    } catch {
+      // Stale/synthetic pointer id: capture is an optimization here, the
+      // window-level listeners below carry the drag regardless. Never let
+      // it abort the drag setup (body would stay stuck in is-resizing).
+    }
+
+    const onMove = (ev) => {
+      const dx = ev.clientX - startX;
+      if (Math.abs(dx) > MIN_PX) moved = true;
+      setFloorFr(startFr + dx / perFr);
+    };
+    const onUp = () => {
+      document.body.classList.remove('is-resizing');
+      grip.classList.remove('is-active');
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if (moved) {
+        localStorage.setItem(KEY, String(floorFrNow()));
+        setActivity('Split saved.', '');
+      }
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  function nudge(dir) {
+    if (!sideBySide()) return;
+    // Nudge in px against the current row so the step feels constant.
+    const rowWidth = appEl.clientWidth - 20 - 20;
+    const perFr = rowWidth / (floorFrNow() + 1);
+    const stepFr = 24 / perFr;
+    localStorage.setItem(KEY, String(setFloorFr(floorFrNow() + dir * stepFr)));
+  }
+
+  grip.addEventListener('pointerdown', beginDrag);
+  grip.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); nudge(-1); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); nudge(+1); }
+    else if (e.key === 'Home') {
+      e.preventDefault();
+      appEl.style.removeProperty('--floor-fr');   // back to the designed 1.9fr
+      localStorage.removeItem(KEY);
+    }
+  });
+  // Double-click: reset to the designed split.
+  grip.addEventListener('dblclick', () => {
+    appEl.style.removeProperty('--floor-fr');
+    localStorage.removeItem(KEY);
+  });
+})();
