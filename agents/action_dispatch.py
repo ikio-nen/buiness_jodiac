@@ -243,7 +243,13 @@ def _handle_send(params: dict, session, sender: str) -> dict:
     result = send_emails_workflow(has_email, sender)
 
     if session.active:
-        session.save_data({"sent": result.get("sent", [])}, "sent_emails.json")
+        # Append, never replace: a session that already has send history
+        # would otherwise have it silently wiped by the next campaign send
+        # (observed live — the prior record vanished when the new list was
+        # written). sent_emails.json is the session's send ledger.
+        prior = session.load_data("sent_emails.json").get("sent", [])
+        session.save_data({"sent": prior + result.get("sent", [])},
+                          "sent_emails.json")
 
     # Final PDF report + campaign bookkeeping. Best-effort: a reporting
     # failure must not turn an executed send into a reported failure.

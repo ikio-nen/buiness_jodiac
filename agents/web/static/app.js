@@ -11,13 +11,13 @@
 // The ?v= on each import is the same version as the document's app.js
 // tag: bump both together or a browser keeps serving an old module.
 import { esc, setActivity, clearActivityIfIdle, showQueuedChip, setWorkActive,
-         wrapAgentEvent } from './js/util.js?v=28';
-import { vtAppend, vtSwap } from './js/transitions.js?v=28';
-import { initQueue, renderQueue } from './js/queue.js?v=28';
-import { initAttachments, takeAttachment } from './js/attachments.js?v=28';
-import { initDictation } from './js/voice.js?v=28';
-import { initMusicCorner } from './js/music.js?v=28';
-import { renderChecklist, renderInterview, removeChecklistCard } from './js/campaign.js?v=28';
+         wrapAgentEvent } from './js/util.js?v=32';
+import { vtAppend, vtSwap } from './js/transitions.js?v=32';
+import { initQueue, renderQueue } from './js/queue.js?v=32';
+import { initAttachments, takeAttachment } from './js/attachments.js?v=32';
+import { initDictation } from './js/voice.js?v=32';
+import { initMusicCorner } from './js/music.js?v=32';
+import { renderChecklist, renderInterview, removeChecklistCard } from './js/campaign.js?v=32';
 
 
 // ── WebSocket Connection ─────────────────────────────────────────
@@ -530,6 +530,10 @@ const botsResizeObserver = ('ResizeObserver' in window)
       const w = opsStage.clientWidth, h = opsStage.clientHeight;
       if (Math.abs(w - __lastStageW) < 2 && Math.abs(h - __lastStageH) < 2) return;
       __lastStageW = w; __lastStageH = h;
+      // Splitter dragged the floor narrow: bot name pills are wider than
+      // their 30px bots and clip at the room edge — drop them, the same
+      // declutter the stacked mobile layout already applies.
+      opsStage.classList.toggle('is-narrow', w < 420);
       for (const name in bots) moveBot(name, BOT_HOME[name] || 'station-brain');
     })
   : null;
@@ -1513,32 +1517,38 @@ fetch('/api/campaign').then(r => r.json()).then(c => {
   const grip = document.getElementById('splitGrip');
   if (!appEl || !grip) return;
 
-  const KEY = 'jarvis.floorFr';
+  const KEY = 'jarvis.floorFr';   // stores the floor's flex RATIO (unitless)
   const MIN_PX = 22;        // px the grip must travel to count as a drag
 
-  // Restore the saved split (validated, then trusted as an fr value).
-  const saved = parseFloat(localStorage.getItem(KEY));
-  if (Number.isFinite(saved) && saved >= 0.2 && saved <= 6) {
-    appEl.style.setProperty('--floor-fr', saved);
+  // The desktop grid takes its whole track list from --floor-cols. A bare
+  // number — and even calc(number * 1fr) — is an invalid track size and
+  // would silently collapse the entire desktop grid (the squeezed-floor
+  // bug), so the JS writes ready-made `Nfr` columns instead.
+  function trackList(fr) {
+    const clamped = Math.min(6, Math.max(0.2, fr));
+    return `minmax(280px, ${clamped}fr) 0px minmax(340px, 1fr)`;
   }
 
-  // Synchronous write: the browser batches style recalc anyway, and the
-  // pointerup handler reads the value back immediately to persist it — a
-  // raf deferral here saved stale values (read-before-write race).
   function setFloorFr(fr) {
-    const clamped = Math.min(6, Math.max(0.2, fr));
-    appEl.style.setProperty('--floor-fr', clamped);
-    return clamped;
+    const cols = trackList(fr);
+    appEl.style.setProperty('--floor-cols', cols);
+    return parseFloat(cols.match(/([\d.]+)fr/)[1]);
   }
 
   function floorFrNow() {
-    // Inline style is the live truth during a drag; fall back to the saved
-    // split, then the designed default.
-    const inline = appEl.style.getPropertyValue('--floor-fr').trim();
-    if (inline) return parseFloat(inline) || 1.9;
+    // Inline track list is the live truth during a drag; fall back to the
+    // saved ratio, then the designed default.
+    const inline = appEl.style.getPropertyValue('--floor-cols').trim();
+    const m = inline.match(/minmax\(280px, ([\d.]+)fr\)/);
+    if (m) return parseFloat(m[1]);
     const saved = parseFloat(localStorage.getItem(KEY));
     if (Number.isFinite(saved) && saved >= 0.2 && saved <= 6) return saved;
     return 1.9;
+  }
+
+  // Restore the saved split on load (floorFrNow validates the range).
+  if (localStorage.getItem(KEY) !== null) {
+    setFloorFr(floorFrNow());
   }
 
   // True when the side-by-side grid (and therefore the grip) is active.
@@ -1601,13 +1611,13 @@ fetch('/api/campaign').then(r => r.json()).then(c => {
     else if (e.key === 'ArrowRight') { e.preventDefault(); nudge(+1); }
     else if (e.key === 'Home') {
       e.preventDefault();
-      appEl.style.removeProperty('--floor-fr');   // back to the designed 1.9fr
+      appEl.style.removeProperty('--floor-cols');  // back to the designed 1.9fr
       localStorage.removeItem(KEY);
     }
   });
   // Double-click: reset to the designed split.
   grip.addEventListener('dblclick', () => {
-    appEl.style.removeProperty('--floor-fr');
+    appEl.style.removeProperty('--floor-cols');
     localStorage.removeItem(KEY);
   });
 })();

@@ -219,8 +219,15 @@ async def websocket_endpoint(websocket: WebSocket):
                                    "and angles are saved — say 'campaign' to resume.",
                     })
                     continue
-                await campaign_ui.handle_text(user_msg, send, memory, ws_id)
-                continue
+                if not campaign_ui.consumes_text(campaign_ui.current_session_id(), user_msg):
+                    # The gate doesn't own this text (a fresh campaign
+                    # request, 'status', a question) — fall through to the
+                    # intent parser. The conversation stays open so the
+                    # gate's own vocabulary still lands in it.
+                    pass
+                else:
+                    await campaign_ui.handle_text(user_msg, send, memory, ws_id)
+                    continue
 
             # ── Active brainstorm conversation ───────────────────────
             if ws_id in _brainstorm_sessions:

@@ -78,10 +78,15 @@ html, body {
   gap: 10px;
   /* Middle track is a 0px splitter: the grip element overflows into the
      gaps around it, so the visible layout matches the old 10px gap while
-     giving the drag handle a real hit area. --floor-fr (set by the drag
-     code / localStorage) is the floor's flex share; the chat column keeps
-     1fr and takes whatever remains. */
-  grid-template-columns: minmax(280px, var(--floor-fr, 1.9fr)) 0px minmax(340px, 1fr);
+     giving the drag handle a real hit area. --floor-cols (written by the
+     drag code / restored from localStorage) is the full desktop track
+     list with REAL units — `0.25` is an invalid track size and even
+     calc(var * 1fr) is rejected for flexible lengths, so the JS writes
+     `minmax(280px, 0.25fr) 0px minmax(340px, 1fr)` verbatim. The var()
+     fallback is the designed 65/35 split. An invalid substituted value
+     would collapse the whole desktop grid (squeezed floor, dead ambient
+     band, unanchored grip), which is why the value ships pre-validated. */
+  grid-template-columns: var(--floor-cols, minmax(280px, 1.9fr) 0px minmax(340px, 1fr));
   grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas:
     "topbar topbar topbar"
@@ -1534,6 +1539,11 @@ select.btn {
   .station-enricher { left: 56%; }   /* clear of builder's right-anchored desk */
   .ops-feed { height: 60px; font-size: 14px; }  /* stop the feed swallowing the short floor */
   .bot-tag { display: none; }
+
+/* Narrow floor (splitter dragged left): same declutter as mobile —
+   the 6px name pills are wider than their 30px bots and clip hard at
+   the room border. Station zone labels stay (they fit; bots re-dock). */
+.room.is-narrow .bot-tag { display: none; }
   /* Buy the chat list room from the decorative chrome. No fixed min-height on
      .messages: it is flex:1 with min-height:0 so it yields before the composer
      does, and a floor here would clip the send button on a very short window. */

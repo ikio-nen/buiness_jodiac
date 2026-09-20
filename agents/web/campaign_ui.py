@@ -182,6 +182,24 @@ async def handle_text(user_msg: str, send, memory, ws_id) -> None:
     await handle_answer(user_msg, send, memory, ws_id)
 
 
+def consumes_text(session_id: str, user_msg: str) -> bool:
+    """True when the open gate must consume this text instead of the parser.
+
+    The interview phase speaks in free text, so it claims everything. The
+    checklist phase owns only its gate vocabulary (approve/tick/select...);
+    anything else typed during it — a fresh campaign request, 'status', a
+    question — must reach the intent parser, or an open gate jails the
+    keyboard and no new campaign can ever start.
+    """
+    state = get_state_safe(session_id)
+    if state.get("phase") == "interview":
+        return True
+    if state.get("phase") == "awaiting_selection":
+        low = user_msg.lower()
+        return any(w in low for w in ("approve", "tick", "select", "pick", "choose"))
+    return False
+
+
 def current_session_id():
     from agents.web.web_session import current
     s = current()
