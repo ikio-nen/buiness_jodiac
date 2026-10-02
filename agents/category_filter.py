@@ -12,6 +12,8 @@ Design (post-mortem of the "hospitals for AutoCAD" failure):
    ("dropped 14 hospitals, 9 computer stores") instead of the user auditing it.
 """
 
+import re as _re
+
 # OSM tags that disqualify a business for education intent no matter what its
 # name says. Substring-matched against the OSM category tag (not the name).
 TAG_KILL_LIST = (
@@ -179,6 +181,41 @@ def _exclusion_hit(business: dict, keywords: list[str]) -> str:
     return ""
 
 
+# Filler words that name no category. A phrase made ONLY of these
+# ("businesses", "any local shops", "find me places near here") is not an
+# intent -- it says "look around" and nothing more. Any specific word keeps the
+# phrase out of this set ("coaching centres", "business consultants",
+# "colleges that teach autocad"), so real intents still reach the AI judge.
+_CATEGORY_FILLERS = {
+    "a", "all", "an", "and", "any", "around", "at", "be", "best", "biz",
+    "business", "businesses", "client", "clients", "companies", "company",
+    "customer", "customers", "don", "dont", "enterprise", "enterprises",
+    "establishment", "establishments", "every", "find", "firm", "firms",
+    "for", "from", "get", "give", "good", "here", "i", "in", "is", "lead",
+    "leads", "list", "local", "look", "looking", "me", "more", "near",
+    "need", "new", "of", "on", "or", "other", "others", "outlet", "outlets",
+    "place", "places", "please", "prospect", "prospects", "s", "search",
+    "shop", "shops", "show", "some", "store", "stores", "t", "that", "the",
+    "to", "up", "us", "vendor", "vendors", "want", "we", "which", "will",
+    "with", "would",
+}
+
+
+def _no_category_signal(category: str) -> bool:
+    """True when the phrase names nothing to filter BY ("businesses").
+
+    The AI tier filter asks the model whether each lead fits what the user is
+    looking for. Handed a filler phrase it can only answer one way -- a school
+    is not what "businesses" means -- and it drops leads the ICP had just
+    accepted; that is how a Bandel search returned 0 businesses while holding
+    5 plausible schools. An EMPTY phrase never triggers this (the caller
+    already treats that as "no filter applied"), and a phrase with even one
+    specific word takes the normal path.
+    """
+    words = _re.findall(r"[a-z]+", (category or "").lower())
+    return bool(words) and all(w in _CATEGORY_FILLERS for w in words)
+
+
 def filter_by_category(businesses: list[dict], category: str,
                        goal: dict = None) -> tuple[list[dict], str]:
     """Filter businesses to match the user's stated intent.
@@ -239,6 +276,27 @@ def filter_by_category(businesses: list[dict], category: str,
 
     if not kept:
         return [], f"Everything dropped by hard tags: {dropped}."
+
+    # Stage 1b: the phrase names no category ("businesses in Bandel"). Stage 2
+    # would ask the AI whether each survivor fits the word "businesses" -- and
+    # the rubric's "unlikely" tier then eats real prospects. The ICP is the
+    # authority on who is a customer (see the veto note in _ai_tier_filter);
+    # with no category named, its verdict stands and nothing is re-judged.
+    # User authority is untouched: Stage 0 exclusions and the hard tags above
+    # already ran and are reported here.
+    # Judged on the phrase LEFT after exclusions are stripped: "businesses
+    # except cafes" names no category either, and its ban word must not look
+    # like an intent. (A pure ban phrase leaves that empty -- and an empty
+    # phrase is deliberately NOT signal-less here, so "remove schools" keeps
+    # its existing path and report.)
+    if _no_category_signal(positive_phrase):
+        excl_txt = (f"user exclusions dropped {sum(excl_dropped.values())} "
+                    f"({_fmt_counts(excl_dropped)}); " if excl_dropped else "")
+        report = (f"Filtered {len(businesses) + sum(excl_dropped.values())} -> "
+                  f"{len(kept)} for \"{category}\": {excl_txt}hard tags dropped "
+                  f"{sum(dropped.values())} ({_fmt_drops(dropped) or 'none'}); "
+                  f"no category named, so the ICP verdict stands as-is.")
+        return kept, report
 
     # Stage 2: AI reasons about fit in tiers over everything that survived.
     judged = _ai_tier_filter(kept, category, exclusions=exclusions)

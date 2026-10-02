@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agents.category_filter import (
     extract_exclusions, filter_by_category, _exclusion_hit, _evidence_note,
+    _no_category_signal,
 )
 
 PASS, FAIL = 0, 0
@@ -446,6 +447,91 @@ try:
 finally:
     _brain_mod.get_brain = _orig_get_brain
     _shutil.rmtree(_tmp, ignore_errors=True)
+
+print("== Filler phrasing must not trigger an AI re-judge (Bandel 0-result) ==")
+# Live failure, 2026-10-02: "find businesses in Bandel" answered
+# "ICP kept 5/15 (5 School (K-12), 5 plausible) ... Filtered 5 -> 0 for
+# \"businesses\": AI dropped 5 school" and returned 0 businesses. The parser
+# handed the filter the literal filler word "businesses"; _ai_tier_filter then
+# asked the model "The user is looking for: \"businesses\"" and the rubric's
+# "unlikely" tier ate all five leads the ICP had just accepted. A phrase that
+# names no category is not an intent to filter BY: the ICP verdict stands.
+check("filler phrase detected: 'businesses'", _no_category_signal("businesses"))
+check("filler phrase detected: 'any local shops near here'",
+      _no_category_signal("any local shops near here"))
+check("filler phrase detected: 'find me places'",
+      _no_category_signal("find me places"))
+check("empty phrase is NOT filler (own code path, own report)",
+      not _no_category_signal(""))
+check("real intent is not filler: 'coaching centres that teach autocad'",
+      not _no_category_signal("coaching centres that teach autocad"))
+check("'business consultants' names a kind, not filler",
+      not _no_category_signal("business consultants"))
+
+# Exactly the live payload shape: five plausible schools, all ICP-kept.
+_BANDEL = [{"name": n, "category": "school",
+            "icp": {"fit": "plausible", "fit_score": 61}}
+           for n in ("Auxilium Convent School", "Bandel St. John's High School",
+                     "Milan Park GSFP Primary school", "Bandel Girls' High School",
+                     "Hooghly Branch School")]
+
+_ai_calls = {"n": 0}
+_orig_gen2 = ai_engine.generate_json
+_orig_avail2 = ai_engine.is_available
+
+
+def _counting_gen(*a, **kw):
+    """Tally AI calls; classify every numbered line as a fit."""
+    _ai_calls["n"] += 1
+    prompt = kw.get("prompt", "") or (a[0] if a else "")
+    n = sum(1 for line in prompt.splitlines()
+            if line[:2].strip(".").isdigit())
+    return {"fits": list(range(1, n + 1)), "plausible": [], "unlikely": []}
+
+
+try:
+    ai_engine.is_available = lambda: True
+    ai_engine.generate_json = _counting_gen
+
+    _ai_calls["n"] = 0
+    _keptB, _repB = filter_by_category([dict(b) for b in _BANDEL],
+                                       "businesses", goal=GOAL)
+    check("'businesses' keeps every ICP survivor (was: AI dropped all 5)",
+          len(_keptB) == len(_BANDEL), [b["name"] for b in _keptB])
+    check("'businesses' makes zero AI calls", _ai_calls["n"] == 0, _ai_calls["n"])
+    check("report explains the bypass (no category named)",
+          "no category named" in _repB, _repB)
+
+    _ai_calls["n"] = 0
+    _keptC, _repC = filter_by_category(
+        [{"name": "Auxilium Convent School", "category": "school",
+          "icp": {"fit": "plausible", "fit_score": 61}},
+         {"name": "Bandel Cafe", "category": "cafe",
+          "icp": {"fit": "unlikely", "fit_score": 10}}],
+        "businesses except cafes", goal=GOAL)
+    check("'businesses except cafes' bypasses too (0 AI calls)",
+          _ai_calls["n"] == 0, _ai_calls["n"])
+    check("...and the user's cafe ban still binds",
+          [b["name"] for b in _keptC] == ["Auxilium Convent School"],
+          [b["name"] for b in _keptC])
+
+    _ai_calls["n"] = 0
+    _keptD, _repD = filter_by_category([dict(b) for b in _BANDEL],
+                                       "coaching centres that teach autocad",
+                                       goal=GOAL)
+    check("a real category phrase still reaches the AI judge exactly once",
+          _ai_calls["n"] == 1, _ai_calls["n"])
+    check("...and the AI re-judge is still reported",
+          "AI dropped" in _repD, _repD)
+
+    _ai_calls["n"] = 0
+    _keptE, _repE = filter_by_category([dict(b) for b in _BANDEL],
+                                       "remove schools", goal=GOAL)
+    check("pure ban phrase unchanged: user exclusion still wins outright",
+          _keptE == [] and "removed everything" in _repE, _repE)
+finally:
+    ai_engine.generate_json = _orig_gen2
+    ai_engine.is_available = _orig_avail2
 
 print()
 print(f"{PASS} passed, {FAIL} failed")

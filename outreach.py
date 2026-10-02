@@ -102,8 +102,12 @@ def send_resend(to_email, subject, body):
     if not api_key:
         return {"error": "RESEND_API_KEY not set"}
 
+    # SENDER_EMAIL is the SMTP-era from address; OUTREACH_FROM_EMAIL is the
+    # env var the outreach_apis clients document, so honor it as the fallback
+    # instead of sending an empty from address.
+    sender_email = SENDER_EMAIL or os.environ.get("OUTREACH_FROM_EMAIL", "")
     payload = json.dumps({
-        "from": f"{SENDER_NAME} <{SENDER_EMAIL}>",
+        "from": f"{SENDER_NAME} <{sender_email}>",
         "to": [to_email],
         "subject": subject,
         "text": body,
@@ -121,8 +125,15 @@ def send_resend(to_email, subject, body):
             resp = json.loads(result.stdout or "{}")
         except Exception:
             resp = {}
-        return {"status": "sent", "to": to_email, "id": resp.get("id", ""),
-                "via": "resend"}
+        # curl exits 0 even on HTTP 4xx/5xx (no --fail), so the exit code is not
+        # proof of delivery: Resend returns an "id" only when it accepted the
+        # message. Reporting a rejected send as "sent" would skip the SendGrid
+        # fallback and mark the lead as contacted forever.
+        if isinstance(resp, dict) and resp.get("id"):
+            return {"status": "sent", "to": to_email, "id": resp["id"],
+                    "via": "resend"}
+        detail = (json.dumps(resp) if resp else (result.stdout or "").strip())
+        return {"error": f"resend rejected: {detail[:200] or 'no response body'}"}
     return {"error": result.stderr}
 
 

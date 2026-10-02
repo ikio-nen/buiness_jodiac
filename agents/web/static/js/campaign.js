@@ -7,7 +7,7 @@
    downstream runs until the user acts.
    ═══════════════════════════════════════════════════════════════ */
 
-import { esc } from './util.js?v=43';
+import { esc } from './util.js?v=44';
 
 const messagesEl = document.getElementById('messages');
 

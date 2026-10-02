@@ -11,14 +11,14 @@
 // The ?v= on each import is the same version as the document's app.js
 // tag: bump both together or a browser keeps serving an old module.
 import { esc, setActivity, clearActivityIfIdle, showQueuedChip, setWorkActive,
-         wrapAgentEvent } from './js/util.js?v=43';
-import { vtAppend, vtSwap } from './js/transitions.js?v=43';
-import { initQueue, renderQueue } from './js/queue.js?v=43';
-import { initAttachments, takeAttachment } from './js/attachments.js?v=43';
-import { initDictation } from './js/voice.js?v=43';
-import { initMusicCorner } from './js/music.js?v=43';
-import { renderChecklist, renderInterview, removeChecklistCard } from './js/campaign.js?v=43';
-import { initVault } from './js/vault.js?v=43';
+         wrapAgentEvent } from './js/util.js?v=44';
+import { vtAppend, vtSwap } from './js/transitions.js?v=44';
+import { initQueue, renderQueue } from './js/queue.js?v=44';
+import { initAttachments, takeAttachment } from './js/attachments.js?v=44';
+import { initDictation } from './js/voice.js?v=44';
+import { initMusicCorner } from './js/music.js?v=44';
+import { renderChecklist, renderInterview, removeChecklistCard } from './js/campaign.js?v=44';
+import { initVault } from './js/vault.js?v=44';
 
 
 // ── WebSocket Connection ─────────────────────────────────────────

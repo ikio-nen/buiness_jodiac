@@ -6,8 +6,10 @@ from pathlib import Path
 # ── Paths ──────────────────────────────────────────────────────────────
 # Portable roots: JODIAC_HOME replaces the F:/jodiac drive letter and
 # JODIAC_OBSIDIAN replaces D:/brain, so the project runs on machines without
-# those drives. Unset = previous behavior (the F:/D:/ laptop is unaffected).
-_JODIAC_HOME = Path(os.environ.get("JODIAC_HOME", "F:/jodiac"))
+# those drives. Unset/empty = previous behavior (the F:/D:/ laptop is
+# unaffected). Note the `or`, not a default arg: an EMPTY env var would
+# otherwise resolve to Path('.') and drop the data dirs into the cwd.
+_JODIAC_HOME = Path(os.environ.get("JODIAC_HOME") or "F:/jodiac")
 PROJECT_ROOT = Path(__file__).parent.parent
 OUTPUT_DIR = _JODIAC_HOME / "agent_output"
 SITES_DIR = OUTPUT_DIR / "sites"
@@ -16,7 +18,7 @@ EMAILS_DIR = OUTPUT_DIR / "emails"
 DATA_DIR = OUTPUT_DIR / "data"
 SESSIONS_DIR = OUTPUT_DIR / "sessions"
 PDF_DIR = OUTPUT_DIR / "pdfs"
-OBSIDIAN_VAULT = Path(os.environ.get("JODIAC_OBSIDIAN", "D:/brain/brain"))
+OBSIDIAN_VAULT = Path(os.environ.get("JODIAC_OBSIDIAN") or "D:/brain/brain")
 OBSIDIAN_PROJECTS = OBSIDIAN_VAULT / "projects"
 OBSIDIAN_CONTACTS = OBSIDIAN_VAULT / "contacts"
 OBSIDIAN_REPORTS = OBSIDIAN_VAULT / "reports"
