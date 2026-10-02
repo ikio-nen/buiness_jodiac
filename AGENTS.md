@@ -12,6 +12,15 @@
 - The project's self-check suite is `agents/test_final_audit.py` (20 checks) — there is no `agents/test_audit_suite.py`. Run `"E:/python.exe" -X utf8 agents/test_final_audit.py`.
 - The `websockets` package IS installed in `E:\python.exe` — drive `/ws` at the protocol level (send raw `{"type": ...}` frames) to test server handlers a browser can't reach, e.g. stale/malformed frames.
 
+## F: Drive Layout (reorganized 2026-10-02, commit `1a7f32f`)
+
+- `F:\jodiac` holds ONLY the Jodiac app: `agents/`, `agent_output/` (the hardcoded data root), `tests/` (outbox ledger), `docs/superpowers/` (design specs), `sites/` (site_builder's output dir), `templates/` + `static/` (the BizFinder Flask prototype), and the top-level pipeline scripts (`app.py`, `pipeline.py`, `enrich.py`, `outreach.py`, `site_builder.py`, `whatsapp.py`).
+- Everything else that used to sit in the repo root moved OUT:
+  - `F:\jarvis` — JARVIS session work-notes (task_plan, progress, findings, chat_notes, the Sep 02 report), `server_config.json` + server/pid files, `SETUP_OMNIROUTE.bat`, and the session scratch probes (`_bodyprobe`, `_probesplit*`, `_headprobe*`, `_css*`, `_tap.json`).
+  - `F:\other-projects` — `rakshanet/` (takes its own `README.md` and `vercel.json` with it), `canvas/`, `obsidian_vault/`, the teacher-video scripts, `swag_roadmap.md`, `winner_sheet.png`, plus the ignored Nivox/Kavach/PDF/calculus artifacts.
+- The repo root has **no README** — the one that shipped here was RakshaNet's. Don't write docs against it; `AGENTS.md` is the project's real documentation.
+- No runtime path was affected (nothing in Python referenced a relocated file); all five suites stayed green after the move. The deletions are committed, so `git checkout <path>` restores anything.
+
 ## Gemini API
 
 - Model `gemini-2.0-flash` is dead. `gemini-2.5-flash` deprecated for new users. Use `gemini-3.5-flash-lite`.
