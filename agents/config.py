@@ -102,6 +102,25 @@ def set_ai_provider_model(model: str):
     save_config(cfg)
 
 
+def get_ai_provider_fallbacks() -> list:
+    """Ordered fallback providers tried after the primary fails.
+
+    Stored as a list of provider names, e.g. ["groq", "openrouter", "zai"].
+    Unknown names are ignored by the cascade in agents/ai/providers.py."""
+    raw = load_config().get("ai_provider_fallbacks", [])
+    if not isinstance(raw, list):
+        return []
+    return [str(p).strip().lower() for p in raw
+            if isinstance(p, str) and p.strip()]
+
+
+def set_ai_provider_fallbacks(providers: list):
+    cfg = load_config()
+    cfg["ai_provider_fallbacks"] = [str(p).strip().lower() for p in providers
+                                    if isinstance(p, str) and p.strip()]
+    save_config(cfg)
+
+
 def get_ai_provider_base_url() -> str:
     return load_config().get("ai_provider_base_url", "")
 
