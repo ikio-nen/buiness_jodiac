@@ -16,6 +16,21 @@ _LOG_DIR = Path("agent_output/usage")
 _LOG_FILE = _LOG_DIR / "usage.jsonl"
 
 
+def _serving_provider(used_gemini: bool) -> str:
+    """Which model path served this call — the cascade grading feed.
+
+    Best-effort: any failure yields "" and the JSONL record is unaffected."""
+    if used_gemini:
+        return "gemini"
+    try:
+        from agents.ai import providers
+        if providers.provider_active():
+            return str(providers.status().get("provider", ""))
+    except Exception:
+        pass
+    return ""
+
+
 def record(capability: str, prompt_version: str, business_id: str = "",
            ok: bool = True, used_gemini: bool = False, notes: str = "") -> None:
     """Append one UsageRecord. Never raises — logging can't break the seam."""
@@ -32,6 +47,17 @@ def record(capability: str, prompt_version: str, business_id: str = "",
         _LOG_DIR.mkdir(parents=True, exist_ok=True)
         with _LOG_FILE.open("a", encoding="utf-8") as f:
             f.write(json.dumps(rec.model_dump(), ensure_ascii=True) + "\n")
+        try:
+            # DB mirror: per-provider grading feed for the cascade.
+            # Best-effort — the JSONL above stays the source of truth.
+            from agents import store as _store
+            _store.log_usage(
+                ts=rec.ts, capability=capability,
+                prompt_version=prompt_version, business_id=business_id,
+                ok=ok, used_gemini=used_gemini,
+                provider=_serving_provider(used_gemini), notes=notes[:160])
+        except Exception:
+            pass
         try:
             from agents.event_bus import emit
             emit("brain", action="ai",

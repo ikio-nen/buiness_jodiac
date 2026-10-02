@@ -1,17 +1,22 @@
 """Configuration for the multi-agent system."""
 import json
+import os
 from pathlib import Path
 
 # ── Paths ──────────────────────────────────────────────────────────────
+# Portable roots: JODIAC_HOME replaces the F:/jodiac drive letter and
+# JODIAC_OBSIDIAN replaces D:/brain, so the project runs on machines without
+# those drives. Unset = previous behavior (the F:/D:/ laptop is unaffected).
+_JODIAC_HOME = Path(os.environ.get("JODIAC_HOME", "F:/jodiac"))
 PROJECT_ROOT = Path(__file__).parent.parent
-OUTPUT_DIR = Path("F:/jodiac/agent_output")
+OUTPUT_DIR = _JODIAC_HOME / "agent_output"
 SITES_DIR = OUTPUT_DIR / "sites"
 REPORTS_DIR = OUTPUT_DIR / "reports"
 EMAILS_DIR = OUTPUT_DIR / "emails"
 DATA_DIR = OUTPUT_DIR / "data"
 SESSIONS_DIR = OUTPUT_DIR / "sessions"
 PDF_DIR = OUTPUT_DIR / "pdfs"
-OBSIDIAN_VAULT = Path("D:/brain/brain")
+OBSIDIAN_VAULT = Path(os.environ.get("JODIAC_OBSIDIAN", "D:/brain/brain"))
 OBSIDIAN_PROJECTS = OBSIDIAN_VAULT / "projects"
 OBSIDIAN_CONTACTS = OBSIDIAN_VAULT / "contacts"
 OBSIDIAN_REPORTS = OBSIDIAN_VAULT / "reports"
@@ -28,7 +33,14 @@ for d in [OUTPUT_DIR, SITES_DIR, REPORTS_DIR, EMAILS_DIR, DATA_DIR,
           SESSIONS_DIR, PDF_DIR, KB_DIR, OBSIDIAN_PROJECTS, OBSIDIAN_CONTACTS,
           OBSIDIAN_REPORTS, OBSIDIAN_INDUSTRIES, OBSIDIAN_RESEARCH,
           OBSIDIAN_COMPETITORS, OBSIDIAN_FOLLOWUPS, OBSIDIAN_INSIGHTS]:
-    d.mkdir(parents=True, exist_ok=True)
+    try:
+        d.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise OSError(
+            f"Cannot create JODIAC data dir '{d}' ({e}). "
+            "Set JODIAC_HOME to a writable folder, e.g. "
+            "JODIAC_HOME=D:\\jodiac (Windows) or JODIAC_HOME=~/jodiac."
+        ) from e
 
 # ── Config file ────────────────────────────────────────────────────────
 CONFIG_FILE = OUTPUT_DIR / "config.json"

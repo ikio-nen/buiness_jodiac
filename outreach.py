@@ -96,6 +96,36 @@ def send_smtp(to_email, subject, body):
         return {"error": str(e)}
 
 
+def send_resend(to_email, subject, body):
+    """Send email via Resend API (3k/mo free, no card)."""
+    api_key = os.environ.get("RESEND_API_KEY", "")
+    if not api_key:
+        return {"error": "RESEND_API_KEY not set"}
+
+    payload = json.dumps({
+        "from": f"{SENDER_NAME} <{SENDER_EMAIL}>",
+        "to": [to_email],
+        "subject": subject,
+        "text": body,
+    })
+
+    result = subprocess.run(
+        ["curl", "-s", "-X", "POST", "https://api.resend.com/emails",
+         "-H", f"Authorization: Bearer {api_key}",
+         "-H", "Content-Type: application/json",
+         "-d", payload],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8", errors="replace", timeout=15)
+
+    if result.returncode == 0:
+        try:
+            resp = json.loads(result.stdout or "{}")
+        except Exception:
+            resp = {}
+        return {"status": "sent", "to": to_email, "id": resp.get("id", ""),
+                "via": "resend"}
+    return {"error": result.stderr}
+
+
 def send_sendgrid(to_email, subject, body):
     """Send email via SendGrid API."""
     api_key = os.environ.get("SENDGRID_API_KEY", "")
@@ -154,7 +184,10 @@ def send_outreach(businesses=None, limit=None, dry_run=False, subject="Get Your 
 
         result = send_smtp(email, subject, body)
         if result.get("error"):
-            # Try SendGrid as fallback
+            # Try Resend (free tier) before SendGrid (trial-only)
+            result = send_resend(email, subject, body)
+        if result.get("error"):
+            # Try SendGrid as final fallback
             result = send_sendgrid(email, subject, body)
 
         biz["outreach"] = {
