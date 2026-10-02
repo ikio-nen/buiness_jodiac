@@ -6,7 +6,7 @@
    Cancel is the one action here, and it goes straight back over the socket
    for the server to honour (or refuse, out loud). */
 
-import { esc } from './util.js?v=28';   // same version as app.js's imports
+import { esc } from './util.js?v=43';   // same version as app.js's imports
 
 let sendFrame = null;
 let onWork = null;

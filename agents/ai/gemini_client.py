@@ -102,8 +102,20 @@ def converse(*, contents: list, system: str = "", tools: list | None = None,
     simply returned for the caller to interpret (the intent parser turns them
     into Actions and never executes them itself).
 
-    Never raises: a failed call comes back as ``ToolTurn.error``.
+    A non-Gemini provider (ollama/Zen/...) routes through providers.converse
+    with the same contract and the same Gemini fallback on failure. Never
+    raises: a failed call comes back as ``ToolTurn.error``.
     """
+    from agents.ai import providers
+    if providers.provider_active():
+        turn = providers.converse(contents=contents, system=system,
+                                  tools=tools, temperature=temperature,
+                                  max_rounds=max_rounds, execute=execute)
+        if not turn.error:
+            return turn
+        print(f"  [AI] provider {providers.get_ai_provider()} failed on "
+              f"converse: {turn.error[:120]} — falling back to Gemini")
+
     from agents.ai_engine import _get_client
     from agents.config import get_ai_model
 

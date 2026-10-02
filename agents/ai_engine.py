@@ -24,14 +24,27 @@ def _get_client():
     if _client is None:
         try:
             from google import genai
-            _client = genai.Client(api_key=key)
+            # Bounded HTTP read (ms). The SDK default is 600s, and a hung
+            # connection froze a whole search chain for 10+ minutes with the
+            # UI stuck on "Thinking" — fail fast instead; the seam's own
+            # retry policy (gemini_client._call_with_retry) then decides.
+            _client = genai.Client(
+                api_key=key,
+                http_options={"timeout": 120 * 1000})
         except Exception:
             return None
     return _client
 
 
 def is_available() -> bool:
-    """Check if Gemini API is configured and reachable."""
+    """Check if the configured AI path can serve calls.
+
+    True when a non-Gemini provider is selected and configured (ollama, Zen,
+    ...), else when the Gemini client is configured.
+    """
+    from agents.ai import providers
+    if providers.provider_active():
+        return True
     return _get_client() is not None
 
 
@@ -41,6 +54,20 @@ def generate(prompt: str, system: str = "", model: str = "",
 
     Retries up to 3 times with a short backoff -- API blips are common.
     """
+    # Non-Gemini provider selected: route there first, fall back to Gemini
+    # on failure (a provider outage must not block the pipeline either).
+    from agents.ai import providers
+    if providers.provider_active():
+        try:
+            return providers.generate(prompt, system=system,
+                                      temperature=temperature,
+                                      max_tokens=max_tokens)
+        except Exception as e:
+            print(f"  [AI] provider {providers.get_ai_provider()} failed: "
+                  f"{str(e)[:120]} — falling back to Gemini")
+            if not _get_client():
+                return ""
+
     client = _get_client()
     if not client:
         return ""

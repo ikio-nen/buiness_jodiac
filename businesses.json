@@ -1,0 +1,23 @@
+[
+  {
+    "name": "A",
+    "email": "a@t.com",
+    "category": "",
+    "address": "",
+    "enrichment": {}
+  },
+  {
+    "name": "B",
+    "email": "b@t.com",
+    "category": "",
+    "address": "",
+    "enrichment": {}
+  },
+  {
+    "name": "C",
+    "email": "",
+    "category": "",
+    "address": "",
+    "enrichment": {}
+  }
+]

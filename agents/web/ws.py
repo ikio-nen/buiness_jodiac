@@ -100,6 +100,9 @@ async def websocket_endpoint(websocket: WebSocket):
         await send({
             "type": "jarvis",
             "content": welcome_content,
+            # Client collapses a consecutive duplicate welcome (socket
+            # reconnect appends a second greeting that reads as a reset).
+            "welcome": True,
             "session_id": session.id if session.active else None,
             "session_name": session.name if session.active else None,
             "profile": profile,

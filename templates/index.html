@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BizFinder — Local Business Search</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; }
+
+        .header { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); padding: 20px 30px; border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 15px; }
+        .header h1 { font-size: 24px; font-weight: 700; }
+        .header h1 span { color: #38bdf8; }
+        .header .subtitle { color: #94a3b8; font-size: 13px; }
+
+        .layout { display: flex; height: calc(100vh - 70px); }
+
+        .sidebar { width: 400px; min-width: 400px; background: #1e293b; border-right: 1px solid #334155; display: flex; flex-direction: column; overflow: hidden; }
+
+        .controls { padding: 16px; border-bottom: 1px solid #334155; }
+        .controls label { display: block; font-size: 12px; color: #94a3b8; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
+        .controls input, .controls select { width: 100%; padding: 8px 12px; background: #0f172a; border: 1px solid #475569; border-radius: 6px; color: #e2e8f0; font-size: 14px; margin-bottom: 10px; }
+        .controls input:focus, .controls select:focus { outline: none; border-color: #38bdf8; }
+        .controls .row { display: flex; gap: 10px; }
+        .controls .row > * { flex: 1; }
+
+        .btn { padding: 10px 16px; border: none; border-radius: 6px; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+        .btn-primary { background: #38bdf8; color: #0f172a; }
+        .btn-primary:hover { background: #7dd3fc; }
+        .btn-primary:disabled { background: #475569; color: #94a3b8; cursor: not-allowed; }
+        .btn-full { width: 100%; }
+
+        .search-bar { display: flex; gap: 8px; margin-bottom: 12px; }
+        .search-bar input { flex: 1; margin-bottom: 0; }
+
+        .status { padding: 8px 16px; font-size: 12px; color: #94a3b8; border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 8px; }
+        .status .dot { width: 6px; height: 6px; border-radius: 50%; background: #475569; }
+        .status .dot.active { background: #22c55e; }
+        .status .dot.loading { background: #eab308; animation: pulse 1s infinite; }
+
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        .results { flex: 1; overflow-y: auto; padding: 8px; }
+        .results::-webkit-scrollbar { width: 6px; }
+        .results::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+
+        .biz-card { background: #0f172a; border: 1px solid #334155; border-radius: 8px; padding: 14px; margin-bottom: 8px; cursor: pointer; transition: all 0.15s; }
+        .biz-card:hover { border-color: #38bdf8; background: #1a2744; }
+        .biz-card .name { font-weight: 600; font-size: 15px; margin-bottom: 4px; }
+        .biz-card .category { font-size: 12px; color: #38bdf8; margin-bottom: 6px; }
+        .biz-card .meta { font-size: 12px; color: #94a3b8; display: flex; flex-direction: column; gap: 3px; }
+        .biz-card .meta span { display: flex; align-items: center; gap: 5px; }
+        .biz-card .tags { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 4px; }
+        .biz-card .tag { background: #1e293b; border: 1px solid #475569; border-radius: 4px; padding: 2px 6px; font-size: 10px; color: #94a3b8; }
+        .biz-card .has-website { color: #22c55e; }
+        .biz-card .no-website { color: #ef4444; }
+
+        .map-container { flex: 1; position: relative; }
+        #map { width: 100%; height: 100%; }
+
+        .click-hint { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: #1e293b; border: 1px solid #334155; border-radius: 6px; padding: 6px 14px; font-size: 12px; color: #94a3b8; z-index: 1000; pointer-events: none; }
+
+        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; color: #475569; }
+        .empty-state svg { margin-bottom: 12px; }
+        .empty-state p { font-size: 14px; }
+
+        .export-bar { padding: 12px 16px; border-top: 1px solid #334155; display: flex; gap: 8px; }
+        .export-bar .btn { font-size: 12px; padding: 6px 12px; background: #334155; color: #e2e8f0; }
+        .export-bar .btn:hover { background: #475569; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>🔍 Biz<span>Finder</span></h1>
+            <div class="subtitle">Find local businesses via OpenStreetMap</div>
+        </div>
+    </div>
+
+    <div class="layout">
+        <div class="sidebar">
+            <div class="controls">
+                <div class="search-bar">
+                    <input type="text" id="searchInput" placeholder="Search city or address..." />
+                    <button class="btn btn-primary" id="geocodeBtn" onclick="geocodeAddress()">Go</button>
+                </div>
+
+                <div class="row">
+                    <div>
+                        <label>Latitude</label>
+                        <input type="number" id="lat" step="any" placeholder="51.5074" />
+                    </div>
+                    <div>
+                        <label>Longitude</label>
+                        <input type="number" id="lon" step="any" placeholder="-0.1278" />
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div>
+                        <label>Radius (meters)</label>
+                        <input type="number" id="radius" value="1000" min="100" max="10000" step="100" />
+                    </div>
+                    <div>
+                        <label>Categories</label>
+                        <select id="categorySelect" multiple size="3">
+                            <option value="shop" selected>Retail / Shop</option>
+                            <option value="amenity" selected>Restaurant / Service</option>
+                            <option value="office">Office / Business</option>
+                            <option value="craft">Craft / Artisan</option>
+                            <option value="healthcare">Healthcare</option>
+                            <option value="leisure">Leisure</option>
+                            <option value="tourism">Tourism</option>
+                        </select>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary btn-full" id="searchBtn" onclick="doSearch()">
+                    Search Businesses
+                </button>
+            </div>
+
+            <div class="status" id="statusBar">
+                <div class="dot" id="statusDot"></div>
+                <span id="statusText">Click on the map or enter an address to start</span>
+            </div>
+
+            <div class="results" id="results">
+                <div class="empty-state">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    <p>Search for businesses to get started</p>
+                </div>
+            </div>
+
+            <div class="export-bar" id="exportBar" style="display:none;">
+                <button class="btn" onclick="exportCSV()">📋 Export CSV</button>
+                <button class="btn" onclick="exportJSON()">📦 Export JSON</button>
+                <span style="font-size:12px;color:#94a3b8;line-height:28px;margin-left:auto;" id="resultCount"></span>
+            </div>
+        </div>
+
+        <div class="map-container">
+            <div id="map"></div>
+            <div class="click-hint" id="clickHint">📍 Click the map to set search location</div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        let map, marker, markers = [];
+        let currentBusinesses = [];
+
+        // Initialize map
+        map = L.map('map').setView([51.5074, -0.1278], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors',
+            maxZoom: 19,
+        }).addTo(map);
+
+        // Set marker style
+        map.on('click', function(e) {
+            setSearchLocation(e.latlng.lat, e.latlng.lng);
+        });
+
+        // Try geolocation
+        if (navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(function(pos) {
+                map.setView([pos.coords.latitude, pos.coords.longitude], 14);
+                setSearchLocation(pos.coords.latitude, pos.coords.longitude);
+            });
+        }
+
+        function setSearchLocation(lat, lon) {
+            document.getElementById('lat').value = lat.toFixed(6);
+            document.getElementById('lon').value = lon.toFixed(6);
+            document.getElementById('clickHint').style.display = 'none';
+
+            if (marker) map.removeLayer(marker);
+            marker = L.marker([lat, lon]).addTo(map).bindPopup('Search center').openPopup();
+        }
+
+        function geocodeAddress() {
+            const q = document.getElementById('searchInput').value.trim();
+            if (!q) return;
+
+            setStatus('loading', `Looking up "${q}"...`);
+            fetch('https://nominatim.openstreetmap.org/search?format=json&q=' + encodeURIComponent(q) + '&limit=1', {
+                headers: { 'User-Agent': 'BizFinder/1.0' }
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.length === 0) {
+                    setStatus('idle', 'Location not found');
+                    return;
+                }
+                const { lat, lon, display_name } = data[0];
+                map.setView([lat, lon], 14);
+                setSearchLocation(parseFloat(lat), parseFloat(lon));
+                setStatus('idle', display_name);
+            })
+            .catch(e => setStatus('idle', 'Geocoding failed: ' + e.message));
+        }
+
+        function doSearch() {
+            const lat = parseFloat(document.getElementById('lat').value);
+            const lon = parseFloat(document.getElementById('lon').value);
+            const radius = parseInt(document.getElementById('radius').value) || 1000;
+            const catSelect = document.getElementById('categorySelect');
+            const categories = Array.from(catSelect.selectedOptions).map(o => o.value);
+
+            if (isNaN(lat) || isNaN(lon)) {
+                alert('Enter coordinates or click the map first');
+                return;
+            }
+
+            setStatus('loading', 'Searching Overpass API...');
+            document.getElementById('searchBtn').disabled = true;
+
+            fetch('/api/search', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lat, lon, radius, categories })
+            })
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('searchBtn').disabled = false;
+                if (data.error) {
+                    setStatus('idle', 'Error: ' + data.error);
+                    return;
+                }
+                currentBusinesses = data.businesses;
+                renderResults(data.businesses);
+                renderMarkers(data.businesses, lat, lon, radius);
+                setStatus('idle', `Found ${data.count} businesses within ${radius}m`);
+            })
+            .catch(e => {
+                document.getElementById('searchBtn').disabled = false;
+                setStatus('idle', 'Search failed: ' + e.message);
+            });
+        }
+
+        function setStatus(state, text) {
+            const dot = document.getElementById('statusDot');
+            const txt = document.getElementById('statusText');
+            dot.className = 'dot' + (state === 'loading' ? ' loading' : state === 'active' ? ' active' : '');
+            txt.textContent = text;
+        }
+
+        function renderResults(businesses) {
+            const el = document.getElementById('results');
+            const exportBar = document.getElementById('exportBar');
+
+            if (businesses.length === 0) {
+                el.innerHTML = '<div class="empty-state"><p>No businesses found in this area</p></div>';
+                exportBar.style.display = 'none';
+                return;
+            }
+
+            exportBar.style.display = 'flex';
+            document.getElementById('resultCount').textContent = `${businesses.length} businesses`;
+
+            el.innerHTML = businesses.map((b, i) => {
+                const websiteHtml = b.website
+                    ? `<span class="has-website">🌐 Has website</span>`
+                    : `<span class="no-website">❌ No website</span>`;
+                const phoneHtml = b.phone ? `<span>📞 ${b.phone}</span>` : '';
+                const emailHtml = b.email ? `<span>✉️ ${b.email}</span>` : '';
+                const hoursHtml = b.opening_hours ? `<span>🕐 ${b.opening_hours}</span>` : '';
+                const addrHtml = b.address ? `<span>📍 ${b.address}</span>` : '';
+
+                return `
+                    <div class="biz-card" onclick="focusBiz(${i})">
+                        <div class="name">${escHtml(b.name)}</div>
+                        <div class="category">${escHtml(b.category)}</div>
+                        <div class="meta">
+                            ${addrHtml}
+                            ${phoneHtml}
+                            ${emailHtml}
+                            ${websiteHtml}
+                            ${hoursHtml}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function renderMarkers(businesses, lat, lon, radius) {
+            markers.forEach(m => map.removeLayer(m));
+            markers = [];
+
+            businesses.forEach((b, i) => {
+                if (b.lat && b.lon) {
+                    const icon = L.divIcon({
+                        className: '',
+                        html: `<div style="background:${b.website ? '#22c55e' : '#ef4444'};width:10px;height:10px;border-radius:50%;border:2px solid white;"></div>`,
+                        iconSize: [14, 14],
+                        iconAnchor: [7, 7],
+                    });
+                    const m = L.marker([b.lat, b.lon], { icon })
+                        .addTo(map)
+                        .bindPopup(`<b>${escHtml(b.name)}</b><br>${escHtml(b.category)}<br>${b.address || ''}`)
+                        .on('click', () => focusBiz(i));
+                    markers.push(m);
+                }
+            });
+
+            // Fit bounds
+            if (markers.length > 0) {
+                const group = L.featureGroup(markers);
+                map.fitBounds(group.getBounds().pad(0.2));
+            }
+        }
+
+        function focusBiz(index) {
+            const b = currentBusinesses[index];
+            if (b.lat && b.lon) {
+                map.setView([b.lat, b.lon], 16);
+                if (markers[index]) markers[index].openPopup();
+            }
+            // Highlight card
+            document.querySelectorAll('.biz-card').forEach((c, i) => {
+                c.style.borderColor = i === index ? '#38bdf8' : '';
+            });
+        }
+
+        function exportCSV() {
+            if (!currentBusinesses.length) return;
+            const headers = ['Name', 'Category', 'Address', 'Phone', 'Email', 'Website', 'Hours', 'Lat', 'Lon'];
+            const rows = currentBusinesses.map(b => [
+                b.name, b.category, b.address, b.phone, b.email, b.website, b.opening_hours, b.lat, b.lon
+            ].map(v => `"${(v || '').replace(/"/g, '""')}"`).join(','));
+            const csv = [headers.join(','), ...rows].join('\n');
+            download('businesses.csv', csv, 'text/csv');
+        }
+
+        function exportJSON() {
+            if (!currentBusinesses.length) return;
+            download('businesses.json', JSON.stringify(currentBusinesses, null, 2), 'application/json');
+        }
+
+        function download(name, content, type) {
+            const blob = new Blob([content], { type });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = name; a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        function escHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s || '';
+            return d.innerHTML;
+        }
+
+        // Enter key triggers search
+        document.getElementById('searchInput').addEventListener('keydown', e => {
+            if (e.key === 'Enter') geocodeAddress();
+        });
+    </script>
+</body>
+</html>

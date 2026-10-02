@@ -95,6 +95,10 @@ def search_businesses_workflow(location: str, radius: int,
     # ranking and the Google Maps failover query, so resolve it first.
     from agents.icp import rank as icp_rank, learn as icp_learn, resolve_goal
     goal_obj = resolve_goal(request=category, explicit=goal)
+    # Say WHERE the goal came from (pinned / inferred / profile) so a wrong
+    # match is diagnosable from the report line alone.
+    source = goal_obj.get("_source", "")
+    source_tag = f" [goal: {source}]" if source else ""
 
     geo = geocode(location)
     if not geo:
@@ -167,6 +171,8 @@ def search_businesses_workflow(location: str, radius: int,
         from agents.category_filter import filter_by_category
         kept, intent_report = filter_by_category(kept, category, goal=goal_obj)
         filter_report = f"{filter_report} {intent_report}"
+    if source_tag:
+        filter_report = f"{filter_report}{source_tag}" if filter_report else source_tag.strip()
 
     # Verify no-site businesses via web search to catch OSM-missing websites
     verified_businesses = verify_no_site_businesses(kept, location)
@@ -201,6 +207,7 @@ def search_businesses_workflow(location: str, radius: int,
         "dropped": dropped,
         "goal": goal_obj["key"],
         "goal_label": goal_obj["label"],
+        "goal_source": goal_obj.get("_source", ""),
         "source": maps_source or "osm",
     }
 
@@ -268,6 +275,16 @@ def enrich_workflow(businesses: list[dict], hunter_key: str) -> dict:
 
         contact_found = (contact_result or {}).get("found", 0)
 
+        # Production enrichment pass (ddgs discovery + MX deliverability +
+        # libphonenumber WhatsApp links + 14-day cache). Runs after the
+        # basic hunter; promotes only verified+deliverable contacts.
+        try:
+            from agents.contact_enricher import enrich_businesses
+            enrich2 = enrich_businesses(missing)
+        except Exception as e:
+            print(f"  [ENRICH] v2 enrichment failed: {e}")
+            enrich2 = None
+
         # Decision-maker pass (CEO/founder/owner), same contract as the
         # Hunter branch above: separate the person from the inbox, promote
         # only when no business address exists at all.
@@ -280,6 +297,7 @@ def enrich_workflow(businesses: list[dict], hunter_key: str) -> dict:
             "method": "maps_fallback",
             "phone_found": maps["phone_found"],
             "contact_finder": contact_result,
+            "enrich_v2": enrich2,
             "exec_finder": exec_result,
             "maps_results": maps,
             "results": [
@@ -340,20 +358,32 @@ def _run_exec_finder(businesses: list[dict]) -> dict:
 
 
 def select_businesses_workflow(businesses: list[dict], choice: str) -> list[dict]:
-    """Parse user selection. Returns selected businesses."""
-    choice = choice.strip().lower()
-    if choice == "all":
+    """Parse user selection. Returns selected businesses.
+
+    Understands "all", "top5" (with the spacing variants the parser passes
+    through), 1-based indices, and business names — "draft for Ankuran"
+    arrives here with the NAME as the choice, which used to select nothing
+    and answer "No businesses selected."
+    """
+    choice = (choice or "").strip().lower()
+    if not choice or choice == "all":
         return list(businesses)
-    if choice == "top5":
+    if choice in ("top5", "top-5", "top 5"):
         return list(businesses[:5])
 
     selected = []
     for part in choice.split(","):
         part = part.strip()
+        if not part:
+            continue
         if part.isdigit():
             idx = int(part) - 1
             if 0 <= idx < len(businesses):
                 selected.append(businesses[idx])
+        else:
+            for b in businesses:
+                if part in (b.get("name") or "").lower() and b not in selected:
+                    selected.append(b)
     return selected
 
 

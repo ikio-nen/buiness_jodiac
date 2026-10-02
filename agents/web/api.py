@@ -16,6 +16,15 @@ from fastapi.responses import FileResponse
 
 from agents.web.web_session import resume_latest
 
+
+def _provider_status() -> dict:
+    """Which AI provider is serving the org (for the status panel)."""
+    try:
+        from agents.ai import providers
+        return providers.status()
+    except Exception:
+        return {"provider": "gemini", "active": False}
+
 STATIC_DIR = Path(__file__).parent / "static"
 
 router = APIRouter()
@@ -60,9 +69,41 @@ async def api_status():
             "businesses_no_site": len(data.get("no_website", [])),
             "drafts_count": len(drafts),
             "ai_configured": ai_engine.is_available(),
+            "ai_provider": _provider_status(),
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+@router.get("/api/goals")
+async def api_goals():
+    """The goal catalog + which goal is pinned (the goal chip's data)."""
+    try:
+        from agents.config import get_active_goal
+        from agents import icp
+        active = get_active_goal()
+        # A pinned custom goal is a phrase, not a catalog key.
+        label = active if (active and not icp.known_goal_key(active)) \
+            else (icp.goal_of(active)["label"] if active else "")
+        return {
+            "active": active,
+            "label": label or "Auto (infer per search)",
+            "is_auto": not active,
+            "goals": [{"key": g["key"], "label": g["label"]}
+                      for g in icp.GOALS.values() if g["key"] != "custom"],
+        }
+    except Exception as e:
+        return {"error": str(e), "active": "", "is_auto": True, "goals": []}
+
+
+@router.post("/api/goals")
+async def api_set_goal(body: dict):
+    """Pin/clear the active goal — same path as the chat 'i sell X' intent."""
+    from agents.action_dispatch import handle_goal
+    result = handle_goal({"goal": (body or {}).get("goal", "")})
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "Could not set goal"))
+    return result
 
 
 @router.get("/api/history")
@@ -360,3 +401,81 @@ async def api_skills_assign(skill_id: str, body: dict = None):
         return {"ok": s is not None, "skill": s}
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+
+# ── Personal key vault ──────────────────────────────────────────────────
+#
+# Every route is a thin guard over agents/web/vault.py, which owns the
+# code hash, the lockout and the token sessions. The invariant: no route
+# below returns secret material without a valid `token` from /unlock,
+# and /reveal is the only place a full secret ever crosses the wire.
+
+@router.get("/api/vault/status")
+async def vault_status():
+    from agents.web import vault
+    return {"has_code": vault.has_code(), **vault.locked_info()}
+
+
+@router.post("/api/vault/set-code")
+async def vault_set_code(body: dict = None):
+    """First-time setup, or a code change with the current code: {code, current?}."""
+    from agents.web import vault
+    body = body or {}
+    res = vault.set_code(str(body.get("code") or ""),
+                         current=body.get("current"))
+    if res is True:
+        return {"ok": True}
+    if res == "exists":
+        raise HTTPException(status_code=403, detail="Wrong current code")
+    raise HTTPException(status_code=400, detail="Code must be 4-128 characters")
+
+
+@router.post("/api/vault/unlock")
+async def vault_unlock(body: dict = None):
+    """Exchange the access code for a session token: {code} -> {token, ttl}."""
+    from agents.web import vault
+    body = body or {}
+    token = vault.verify(str(body.get("code") or ""))
+    if not token:
+        info = vault.locked_info()
+        raise HTTPException(status_code=401, detail={
+            "message": "Wrong code" if not info["locked"] else "Vault locked",
+            **info})
+    return {"ok": True, "token": token, "ttl": vault.ttl(token)}
+
+
+@router.post("/api/vault/lock")
+async def vault_lock(body: dict = None):
+    from agents.web import vault
+    vault.lock(str((body or {}).get("token") or ""))
+    return {"ok": True}
+
+
+@router.get("/api/vault/keys")
+async def vault_keys(token: str = ""):
+    """Masked key inventory — requires a session token from /unlock."""
+    from agents.web import vault
+    if not vault.check(token):
+        raise HTTPException(status_code=401, detail="Vault is locked")
+    return {"ok": True, "entries": vault.entries(), "ttl": vault.ttl(token)}
+
+
+@router.get("/api/vault/activity")
+async def vault_activity(token: str = ""):
+    """Vault event log (newest first) — token-gated like the keys."""
+    from agents.web import vault
+    if not vault.check(token):
+        raise HTTPException(status_code=401, detail="Vault is locked")
+    return {"ok": True, "events": vault.activity(), "ttl": vault.ttl(token)}
+
+
+@router.get("/api/vault/reveal/{entry_id}")
+async def vault_reveal(entry_id: str, token: str = ""):
+    """The one route a full secret ever crosses — token-gated, logged by touch."""
+    from agents.web import vault
+    if not vault.check(token):
+        raise HTTPException(status_code=401, detail="Vault is locked")
+    secret = vault.reveal(entry_id)
+    if secret is None:
+        raise HTTPException(status_code=404, detail="Unknown vault entry")
+    return {"ok": True, "id": entry_id, "secret": secret, "ttl": vault.ttl(token)}

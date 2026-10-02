@@ -81,6 +81,51 @@ def set_gemini_key(key: str):
 def get_ai_model() -> str:
     return load_config().get("ai_model", "gemini-3.5-flash-lite")
 
+
+def get_ai_provider() -> str:
+    return load_config().get("ai_provider", "gemini")
+
+
+def set_ai_provider(provider: str):
+    cfg = load_config()
+    cfg["ai_provider"] = provider
+    save_config(cfg)
+
+
+def get_ai_provider_model() -> str:
+    return load_config().get("ai_provider_model", "")
+
+
+def set_ai_provider_model(model: str):
+    cfg = load_config()
+    cfg["ai_provider_model"] = model
+    save_config(cfg)
+
+
+def get_ai_provider_base_url() -> str:
+    return load_config().get("ai_provider_base_url", "")
+
+
+def set_ai_provider_base_url(url: str):
+    cfg = load_config()
+    cfg["ai_provider_base_url"] = url
+    save_config(cfg)
+
+
+def get_ai_provider_key() -> str:
+    # Env var wins so a key never has to touch config.json on disk.
+    import os
+    env = os.environ.get("AI_PROVIDER_KEY", "")
+    if env:
+        return env
+    return load_config().get("ai_provider_key", "")
+
+
+# NOTE: no set_ai_provider_key here is deliberate — keys arrive via env var
+# (AI_PROVIDER_KEY) or manual config.json edit, never through code paths that
+# could log or persist them accidentally.
+
+
 def set_ai_model(model: str):
     cfg = load_config()
     cfg["ai_model"] = model
@@ -102,6 +147,21 @@ def set_business_profile(profile: dict):
     """Save the business profile."""
     cfg = load_config()
     cfg["business_profile"] = profile
+    save_config(cfg)
+
+# ── Active goal ──────────────────────────────────────────────────────
+def get_active_goal() -> str:
+    """The user's pinned selling goal (a goal key, or '' = infer per search).
+
+    The goal is what JARVIS is selling RIGHT NOW — the user changes it per
+    search, so it lives here (persisted) instead of being guessed from each
+    query's wording."""
+    return load_config().get("active_goal", "")
+
+def set_active_goal(name: str):
+    """Pin the selling goal (a goal key, or '' to clear back to auto-infer)."""
+    cfg = load_config()
+    cfg["active_goal"] = name or ""
     save_config(cfg)
 
 def get_email_tone() -> str:

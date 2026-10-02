@@ -215,13 +215,37 @@ class Brain:
                 st = g["signal_stats"].setdefault(sig, {"fits": 0, "unlikely": 0})
                 st[bucket] = st.get(bucket, 0) + 1
             label = verdict.get("institution_type")
-            if label and is_fit:
-                ts = g["type_stats"].setdefault(label, {"seen": 0})
-                ts["seen"] += 1
+            if label and not label.startswith("Rejected (memory)"):
+                # Carried verdicts are SKIPS, not judgments: counting them
+                # would double-charge every re-searched pile against the
+                # learned rates. (Known rejections whose reason is not a
+                # structural one were never counted before either — see
+                # the memory filter in icp.known_rejections.)
+                # Both sides of the conversion story: judged counts let later
+                # runs compute a RATE (fits/judged), not just raw fit counts.
+                # ``fits`` starts the epoch ``judged`` measures: legacy entries
+                # mix an all-time ``seen`` with a since-tracking ``judged``,
+                # so their rate is re-based here (all-time ``seen`` stays for
+                # display in get_icp_context).
+                ts = g["type_stats"].setdefault(label, {"seen": 0, "judged": 0})
+                ts.setdefault("judged", 0)
+                if "fits" not in ts:
+                    ts["fits"] = 0
+                    ts["judged"] = 0
+                ts["judged"] += 1
+                if is_fit:
+                    ts["seen"] += 1
+                    ts["fits"] += 1
             # Remember who we already ruled out for this goal, so the same piles
             # are not re-litigated on every future search of the same area.
+            # Store the FIRST structural reason verbatim: a re-learned skip
+            # arrives with "(known rejection)" appended, and storing that
+            # would compound the suffix on every future search.
             if not is_fit and verdict.get("disqualifiers"):
-                rejected[biz.get("name", "?")] = verdict["disqualifiers"][0]
+                reason = verdict["disqualifiers"][0]
+                if reason not in rejected and not reason.endswith(
+                        "(known rejection)"):
+                    rejected[biz.get("name", "?")] = reason
         for stale in list(rejected)[:-200]:
             del rejected[stale]
 
@@ -241,6 +265,18 @@ class Brain:
         data["updated_at"] = datetime.now().isoformat()
         self._write(self._icp_path(), data)
         return data
+
+    def get_rejected_names(self, goal_key: str = "") -> dict:
+        """name -> first disqualifier, for one goal (empty key = all goals).
+
+        Readers must pass the goal of their search: a "no" from selling
+        websites is not a "no" from selling licences.
+        """
+        data = self.get_icp()
+        by_goal: dict = data.get("by_goal") or {}
+        if not goal_key:
+            return {}
+        return dict((by_goal.get(goal_key) or {}).get("rejected_names") or {})
 
     def get_icp_context(self, goal_key: str = "") -> str:
         """What we have learned about who fits, for one goal (or all goals)."""

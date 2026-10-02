@@ -67,6 +67,8 @@ _ROWS = [
     Row(ActionType.CAMPAIGN, "start_campaign",
         progress="Running the guided campaign (discover, curate, approve)...",
         result_kind="campaign_checklist"),
+    Row(ActionType.GOAL, "set_selling_goal",
+        ack="Updating what we're selling..."),
     Row(ActionType.LIST_SESSIONS, "list_sessions",
         ack="Here are your sessions...", skip_ack=True),
 ]

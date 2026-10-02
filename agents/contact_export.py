@@ -48,6 +48,7 @@ def contact_rows(businesses: list[dict]) -> list[dict[str, str]]:
         )
         if not phone and not email:
             continue
+        v2 = b.get("enrichment_v2") or {}
         rows.append({
             "name": name,
             "category": b.get("category", ""),
@@ -57,6 +58,12 @@ def contact_rows(businesses: list[dict]) -> list[dict[str, str]]:
             "email": email,
             "email_source": _email_source(b),
             "website": b.get("website", ""),
+            # WhatsApp-ready mobile (validated MOBILE via libphonenumber) and
+            # the email's MX deliverability, from enrichment v2.
+            "whatsapp": v2.get("whatsapp", "") or b.get("whatsapp_link", ""),
+            "email_status": ("deliverable" if (v2.get("candidates") and
+                              any(c.get("status") == "deliverable"
+                                  for c in v2["candidates"])) else ""),
         })
     return rows
 
@@ -80,7 +87,7 @@ def write_phones_csv(
 
     fieldnames = [
         "name", "category", "address", "phone", "phone_source",
-        "email", "email_source", "website",
+        "email", "email_source", "website", "whatsapp", "email_status",
     ]
     with path.open("w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)

@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=32">
+  <link rel="stylesheet" href="/static/style.css?v=43">
 </head>
 <body>
   <div class="app">
@@ -25,9 +25,14 @@
         </span>
       </div>
       <div class="topbar-right">
+        <button class="goal-chip" id="goalChip" title="What JARVIS is selling right now — click to change" aria-label="Selling goal" aria-haspopup="true" aria-expanded="false">
+          <i class="goal-dot" aria-hidden="true"></i>
+          <span id="goalChipText">Goal: auto</span>
+        </button>
         <span class="conn" id="connChip"><i class="conn-dot" id="statusDot" aria-hidden="true"></i><span id="statusText">connecting…</span></span>
         <button class="icon-btn" id="musicBtn" title="Music corner — lo-fi for the office" aria-label="Music corner">♪</button>
         <button class="icon-btn" id="historyBtn" title="Conversation history" aria-label="Conversation history">▤</button>
+        <button class="icon-btn" id="vaultBtn" title="Key vault — your API keys, code-locked" aria-label="Key vault">🔑</button>
         <button class="icon-btn" id="statusBtn" title="System status" aria-label="System status">◉</button>
       </div>
     </header>
@@ -258,7 +263,26 @@
     <div class="status-content" id="statusContent" aria-live="polite">Loading…</div>
   </div>
 
-  <script type="module" src="/static/app.js?v=32"></script>
-  <script type="module" src="/static/js/campaign.js?v=32"></script>
+  <!-- Selling goal -->
+  <div class="status-panel goal-panel" id="goalPanel">
+    <div class="status-panel-header">
+      <span>SELLING GOAL</span>
+      <button class="btn-close" id="closeGoal" aria-label="Close goal panel">&times;</button>
+    </div>
+    <div class="status-content goal-body" id="goalBody" aria-live="polite">Loading…</div>
+  </div>
+
+  <!-- Key vault -->
+  <div class="status-panel vault-panel" id="vaultPanel">
+    <div class="status-panel-header">
+      <span>KEY VAULT</span>
+      <button class="btn-close" id="closeVault" aria-label="Close key vault">&times;</button>
+    </div>
+    <div class="status-content vault-body" id="vaultBody" aria-live="polite">Locked.</div>
+  </div>
+
+  <script type="module" src="/static/app.js?v=43"></script>
+  <script type="module" src="/static/js/campaign.js?v=43"></script>
+  <script type="module" src="/static/js/vault.js?v=43"></script>
 </body>
 </html>

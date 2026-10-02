@@ -5,17 +5,20 @@ licensing proposal, selling websites produces a website proposal, and an
 unknown goal falls back to something honest and generic. Content is declarative
 per goal; this module only renders it, so adding a goal never means touching
 layout code.
+
+Rendered on the shared theme (agents/pdf_theme.py) with ReportLab Platypus.
 """
 from datetime import datetime
 
-from fpdf import FPDF
+from reportlab.platypus import PageBreak, Paragraph, Spacer, Table, TableStyle
 
-from .config import PDF_DIR
+from agents import pdf_theme
+from agents.config import PDF_DIR
 
 
-def _latin1(text: str) -> str:
-    """Make any text safe for fpdf's core Helvetica font (latin-1 only)."""
-    return (text or "").encode("latin-1", "replace").decode("latin-1")
+def _esc(text) -> str:
+    from xml.sax.saxutils import escape
+    return escape(str(text if text is not None else "-"))
 
 
 # ── Per-goal document content ────────────────────────────────────────
@@ -133,90 +136,81 @@ PROPOSAL_COPY = {
 def generate_proposal_pdf(business: dict, sender_name: str = "The Team",
                           goal=None) -> str:
     """Generate the proposal PDF for this goal. Returns the file path."""
-    from .icp import resolve_goal, product_line
+    from agents.icp import resolve_goal, product_line
 
     goal = goal or resolve_goal()
-    product = _latin1(product_line(goal))
+    product = product_line(goal)
     copy = PROPOSAL_COPY.get(goal["key"]) or PROPOSAL_COPY["custom"]
 
-    name = _latin1(business.get("name", "Business"))
-    address = _latin1(business.get("address", ""))
+    name = business.get("name", "Business")
+    address = business.get("address", "")
     verdict = business.get("icp") or {}
-    kind = _latin1((verdict.get("institution_type") or "local business").lower())
+    kind = (verdict.get("institution_type") or "local business").lower()
     where = f"Located at {address}, " if address else ""
 
     def fill(text: str) -> str:
         return (text.replace("{name}", name).replace("{product}", product)
                     .replace("{kind}", kind).replace("{where}", where))
 
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=25)
-
-    # ── Cover page ──
-    pdf.add_page()
-    pdf.set_font("Helvetica", "B", 24)
-    pdf.set_text_color(25, 118, 210)
-    pdf.multi_cell(0, 13, fill(copy["title"]) + "\n", align="C")
-    pdf.set_font("Helvetica", "B", 15)
-    pdf.set_text_color(100, 100, 100)
-    pdf.multi_cell(0, 9, _latin1(copy["subtitle"]) + "\n", align="C")
-    pdf.set_font("Helvetica", "", 14)
-    pdf.multi_cell(0, 9, f"Prepared for {name}\n", align="C")
-    pdf.set_font("Helvetica", "", 11)
-    pdf.multi_cell(0, 8, f"Date: {datetime.now().strftime('%B %d, %Y')}\n", align="C")
-    pdf.multi_cell(0, 8, f"Prepared by: {_latin1(sender_name)}\n", align="C")
-    pdf.ln(10)
-
-    def heading(text: str):
-        pdf.set_font("Helvetica", "B", 16)
-        pdf.set_text_color(33, 33, 33)
-        pdf.multi_cell(0, 10, _latin1(text) + "\n")
-
-    def body(text: str, indent: str = "  - "):
-        pdf.set_font("Helvetica", "", 11)
-        pdf.set_text_color(60, 60, 60)
-        pdf.multi_cell(0, 7, f"{indent}{_latin1(text)}\n")
-
-    heading("Understanding Your Requirement")
-    pdf.set_font("Helvetica", "", 11)
-    pdf.set_text_color(60, 60, 60)
-    pdf.multi_cell(0, 7, _latin1(fill(copy["understanding"])) + "\n")
-
-    heading("What We Propose")
-    pdf.set_font("Helvetica", "B", 12)
-    pdf.multi_cell(0, 8, _latin1(copy["offer_head"]) + "\n")
-    for line in copy["offer"]:
-        body(fill(line))
-
-    heading(copy["why_head"])
-    for line in copy["why"]:
-        body(fill(line))
-
-    heading(copy["tiers_head"])
-    for tier, tier_desc in copy["tiers"]:
-        pdf.set_font("Helvetica", "B", 11)
-        pdf.set_text_color(33, 33, 33)
-        pdf.multi_cell(0, 7, "  " + _latin1(fill(tier)) + "\n")
-        pdf.set_font("Helvetica", "", 10)
-        pdf.set_text_color(100, 100, 100)
-        pdf.multi_cell(0, 7, "    " + _latin1(fill(tier_desc)) + "\n")
-    pdf.ln(2)
-    pdf.set_font("Helvetica", "I", 10)
-    pdf.set_text_color(100, 100, 100)
-    pdf.multi_cell(0, 7, "  Final pricing is confirmed on quotation.\n")
-
-    heading("Next Steps")
-    for step in copy["steps"]:
-        body(fill(step))
-
-    # ── Footer ──
-    pdf.ln(10)
-    pdf.set_font("Helvetica", "I", 10)
-    pdf.set_text_color(150, 150, 150)
-    pdf.multi_cell(0, 7, f"Generated on {datetime.now().strftime('%B %d, %Y')}\n", align="C")
-
-    # ── Save ──
+    width = pdf_theme.PAGE_W - 2 * pdf_theme.MARGIN
     slug = "".join(c if c.isalnum() else "_" for c in name.lower())
     output_path = PDF_DIR / f"proposal_{slug}.pdf"
-    pdf.output(str(output_path))
+    doc = pdf_theme.ThemeDoc(output_path)
+    story: list = []
+
+    # ── Cover ──
+    story.append(Spacer(1, 60))
+    story.append(Paragraph(
+        f'<font size="26" color="{pdf_theme.hexv(pdf_theme.DEEP)}"><b>'
+        f'{_esc(fill(copy["title"]))}</b></font>',
+        pdf_theme._s("cover", leading=32, alignment=1)))
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(
+        f'<font size="13" color="{pdf_theme.hexv(pdf_theme.CORAL)}">'
+        f'{_esc(copy["subtitle"])}</font>',
+        pdf_theme._s("coversub", leading=18, alignment=1)))
+    story.append(Spacer(1, 30))
+    story.append(Paragraph(
+        f'Prepared for <b>{_esc(name)}</b>',
+        pdf_theme._s("coverfor", fontSize=12, leading=16, alignment=1)))
+    story.append(Spacer(1, 6))
+    story.append(Paragraph(
+        datetime.now().strftime("%B %d, %Y") + "  ·  Prepared by "
+        + _esc(sender_name),
+        pdf_theme._s("coverby", fontSize=10, leading=14,
+                     textColor=pdf_theme.INK_SOFT, alignment=1)))
+    story.append(PageBreak())
+
+    # ── Body ──
+    story += pdf_theme.section("Understanding Your Requirement")
+    story.append(Paragraph(_esc(fill(copy["understanding"])), pdf_theme.S_BODY))
+
+    story += pdf_theme.section("What We Propose")
+    story.append(Paragraph(f"<b>{_esc(copy['offer_head'])}</b>", pdf_theme.S_BODY))
+    offer_rows = [["•", _esc(fill(line))] for line in copy["offer"]]
+    story.append(pdf_theme.data_table(["", ""], offer_rows,
+                                      [width * 0.04, width * 0.96]))
+    story.append(Spacer(1, 4))
+
+    story += pdf_theme.section(copy["why_head"])
+    why_rows = [["•", _esc(fill(line))] for line in copy["why"]]
+    story.append(pdf_theme.data_table(["", ""], why_rows,
+                                      [width * 0.04, width * 0.96]))
+
+    story += pdf_theme.section(copy["tiers_head"])
+    tier_rows = [[Paragraph(f"<b>{_esc(fill(t))}</b>", pdf_theme.S_CELL),
+                  Paragraph(_esc(fill(d)), pdf_theme.S_CELL)]
+                 for t, d in copy["tiers"]]
+    story.append(pdf_theme.data_table(["Package", "Best for"], tier_rows,
+                                      [width * 0.38, width * 0.62]))
+    story.append(Spacer(1, 4))
+    story.append(pdf_theme.callout(
+        "Final pricing is confirmed on quotation — sized to your requirement, "
+        "not a list price."))
+
+    story += pdf_theme.section("Next Steps")
+    step_rows = [[_esc(fill(s))] for s in copy["steps"]]
+    story.append(pdf_theme.data_table(["How it goes"], step_rows, [width]))
+
+    doc.build(story)
     return str(output_path)

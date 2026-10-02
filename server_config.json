@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "python",
+      "args": [
+        "-m",
+        "mcp_server_filesystem",
+        "--root",
+        "F:\\jodiac"
+      ],
+      "env": {}
+    }
+  }
+}

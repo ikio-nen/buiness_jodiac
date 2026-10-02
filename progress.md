@@ -1,5 +1,53 @@
 # Progress Log — JARVIS AI Outreach System
 
+## Session: Production contact enrichment (deep-enrichment layer)
+**Date:** 2026-09-24 (afternoon)
+**Status:** Complete
+
+### Built (contact enrichment v2)
+1. `agents/contact_enricher.py` — the production layer: ddgs multi-backend keyless website discovery (bing/ddg/google/brave failover, replaces single-selector Bing scrape), MX deliverability (dnspython, 1.1.1.1/8.8.8.8/9.9.9.9, 1h in-proc cache), libphonenumber validation (E.164, MOBILE→wa.me links, landlines excluded), 14-day disk cache at agent_output/contact_cache.json
+2. `contact_finder.py`: `extra_search` injection seam + `_dns_resolves` pre-filter (kills the 9-domain × 3-retry NXDOMAIN storm) + `_decode_sucuri_cookie` (solves Sucuri CloudProxy JS gate in-process — base64 blob + fromCharCode concat eval) + probes only when search found nothing (fetch-credit fix: 8 credits were eaten by name-guessed probes before the real homepage)
+3. `workflows.enrich_workflow` runs v2 after the basic hunter; report line now says "Deep enrichment: N deliverable email(s), M WhatsApp-ready phone(s) (K from cache)"; fixed `enriched` (list) read as count → `enriched_count`
+4. CSV: `whatsapp` + `email_status` (deliverable) columns
+5. `requirements.txt` created (fastapi, scrapling, reportlab, ddgs, dnspython, phonenumbers, websockets, uvicorn, python-multipart)
+
+### Live proof
+University of Calcutta College Street (FIT 85, previously "emails for 0" on every search) → **registrar@caluniv.ac.in, MX-confirmed deliverable**, promoted to recipient; cache re-hit 0.9s vs ~60s network; 19/19 new test suite (`test_contact_enricher.py`)
+
+### Notes
+- test_goal_state "search phrasing stays a SEARCH" is a pre-existing flake (parse_intent → live Gemini; 503 once, passed on rerun) — not from this work
+- discovery latency ~3.5s/biz (ddgs auto backend); budget 40s/biz, DNS pre-filter keeps it honest
+
+---
+
+## Session: Selling-goal state + filter intelligence + adversarial review
+**Date:** 2026-09-23 → 2026-09-24
+**Status:** Complete
+
+### Built (Phase 8 — goal state)
+1. `config.get/set_active_goal` — persisted pin in config.json; what we sell is user state, not a guess
+2. `icp.resolve_goal` precedence (explicit → pin → wording → profile) with `_source` stamped on a COPY; filter report ends `[goal: ...]`
+3. GOAL intent: zero-API fastpath (contractions, discourse tails, clears) + Gemini `set_selling_goal` tool + registry/dispatch rows — all three surfaces
+4. Web UI: `/api/goals` GET/POST, topbar chip (green/amber), panel with catalog + custom pin, live chip flip on chat-set goals
+
+### Built (Phase 9 — gate + history)
+5. `icp._not_an_organization()` — universal goal-independent gate (tail-is-head-noun grammar); replaced the auditorium/university/building patch pile; corpus test pins 16 non-customers + 6 must-stays
+6. History loop closed: brain counts `judged` per type; `learned_type_rates` (min sample 8) → ±5 with visible reasons; rank() names best converters; specialist prompts carry per-goal learned block
+7. `agents/test_goal_state.py` (26 checks) + corpus additions to `test_category_exclusions.py` (63 total)
+
+### Adversarial review (fresh-eyes pass, 2026-09-24) — 6 defects found & fixed
+- Contraction gap: "i'm selling X" / "we're selling X" missed the fastpath (space-before-apostrophe bug); "i now sell X" died at the guard
+- Fastpath overreach: "goal keeper gloves supplier" pinned a goal (bare-whitespace match)
+- Live-proved Gemini fired set_selling_goal on that exact search — root cause was MY prompt line telling it to switch goals on product-named searches; rewrote prompt + added deterministic shape-gate backstop at the emit site + empty-turn fall-through
+- int→round % truncation in 5 display sites (0.29 showed as 28%)
+- `learned_type_rates("")` CAD-fallback contamination → returns {}
+- Stale `util.js?v=28` double-load (3 sub-imports pinned old) → all assets bumped together to v39
+
+### Verification
+- Suites: goal-state 26/26, exclusions+history 63/63, self-audit 20/20; node --check all JS
+- Live UI: console clean, one copy of each module, "i'm selling autocad keys" pins via chat (chip flips green), "best goal scorers in football history" leaves the pin standing (answered as chat)
+- Server restarted twice to load fixed modules; WS re-verified post-restart (11 ms connect)
+
 ## Session: Guided Campaign Mode (6-stage flow) — Build + Live Run
 **Date:** 2026-09-20 → 2026-09-21
 **Status:** Complete

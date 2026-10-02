@@ -1,0 +1,11 @@
+# JARVIS (jodiac) — Python dependencies.
+# Install: pip install -r requirements.txt
+fastapi
+uvicorn[standard]
+python-multipart
+scrapling
+reportlab
+ddgs            # keyless multi-backend web search (website discovery, agent research)
+dnspython       # MX deliverability checks for found emails
+phonenumbers    # libphonenumber: phone validation, E.164, WhatsApp-ready mobiles
+websockets

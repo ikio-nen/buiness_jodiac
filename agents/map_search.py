@@ -57,7 +57,8 @@ def search_businesses(lat: float, lon: float, radius: int = 2000,
     # killed it outright instead of moving on to the next one. Each endpoint
     # gets its own slice of the budget so a hanging primary can never eat the
     # time its mirrors would need -- failover must actually be reachable.
-    data = None
+    data = None            # first NON-EMPTY JSON payload wins
+    empty_endpoints = set()  # endpoints that answered valid JSON but 0 elements
     failure = ""
     deadline = time.monotonic() + 100.0
     per_endpoint = 100.0 / max(len(OVERPASS_URLS), 1)
@@ -83,10 +84,22 @@ def search_businesses(lat: float, lon: float, radius: int = 2000,
             else:
                 if result.returncode == 0 and result.stdout.strip():
                     try:
-                        data = json.loads(result.stdout)
-                        break
+                        payload = json.loads(result.stdout)
                     except json.JSONDecodeError:
                         failure = f"{url} returned invalid JSON"
+                    else:
+                        if payload.get("elements"):
+                            data = payload
+                            break
+                        # A mirror that doesn't serve this region (or is
+                        # degraded) answers VALID JSON with 0 elements. That
+                        # used to be accepted as success, so a rate-limited
+                        # primary followed by an empty mirror reported
+                        # "Found 0" for a town that has 60+ businesses. An
+                        # empty answer is only trustworthy if EVERY endpoint
+                        # agrees -- remember it and keep trying.
+                        empty_endpoints.add(url)
+                        failure = f"{url} answered empty (0 elements)"
                 else:
                     failure = f"{url} returned nothing (curl {result.returncode})"
             time.sleep(2 * (attempt + 1))  # backoff: 2s, 4s
@@ -94,7 +107,15 @@ def search_businesses(lat: float, lon: float, radius: int = 2000,
             break
 
     if data is None:
-        raise RuntimeError(f"Overpass API failed on all {len(OVERPASS_URLS)} endpoints ({failure})")
+        if len(empty_endpoints) == len(OVERPASS_URLS):
+            # Every endpoint answered with a real, empty dataset: genuinely
+            # no OSM data here. That is an honest empty, not an error.
+            data = {"elements": []}
+        else:
+            mirror_note = (f"; {len(empty_endpoints)} mirror(s) answered empty "
+                           f"for this region") if empty_endpoints else ""
+            raise RuntimeError(f"Overpass API failed on all {len(OVERPASS_URLS)} "
+                               f"endpoints ({failure}{mirror_note})")
     businesses = []
     seen_names = set()
 

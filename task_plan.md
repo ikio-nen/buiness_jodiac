@@ -4,7 +4,7 @@
 Build an intelligent business outreach system that finds businesses, researches them, drafts personalized emails, and sends them — with an AI brain that gets smarter over time.
 
 ## Current Status
-Functional end to end and live-proven (2026-09-21): Gemini-first chatbot, agent-office web UI (Ghibli pixel floor, v28 assets), growing brain, and the **Guided Campaign Mode** — a 6-stage flow (discover→checklist→initial PDF→1-by-1 interview→unique drafts→send+final PDF) — built, audited 20/20, dry-run tested at the WS protocol level, and executed for real on Bardhaman (1 sent via jodiacwebservice@gmail.com, 7 drafts pending contact addresses).
+Functional end to end and live-proven (2026-09-24). Everything below plus the **selling-goal system** — what JARVIS sells is pinned user state, never guessed from search wording — a **universal non-organization gate** that kills OSM structure records (buildings/grounds/venues) by noun-phrase grammar, **history-driven targeting** where the brain's 13k-judged conversion history now moves rankings and specialist prompts, and **production contact enrichment**: ddgs multi-backend site discovery, MX-validated emails, libphonenumber phones with WhatsApp links, 14-day cache, Sucuri anti-bot solving. Live proof: the FIT-85 university that every search returned "0 emails" for now gets registrar@caluniv.ac.in (MX-confirmed). Suites: contact-enricher 19/19, exclusions+history+memory 73/73, goal-state green (one pre-existing Gemini flake), self-audit 20/20.
 
 ## Phases
 
@@ -58,6 +58,22 @@ Functional end to end and live-proven (2026-09-21): Gemini-first chatbot, agent-
 - [ ] Reply classification + follow-up scheduling on incoming responses
 - [ ] Send the 7 pending Bardhaman drafts once addresses exist
 
+### Phase 8: Selling-Goal State ✅ Complete (2026-09-24)
+- [x] Persisted goal state: config.get/set_active_goal (config.json), never inferred silently
+- [x] icp.resolve_goal precedence: explicit per-search → PINNED goal → search wording → profile product; every resolution stamps `_source` on a COPY (registry never mutated)
+- [x] GOAL intent on all three surfaces: chatbot fastpath (zero API) + Gemini `set_selling_goal` tool + registry/dispatch rows; custom goals store the user's phrase verbatim without touching profile product
+- [x] Filter report ends `[goal: active goal | search wording | ...]` — misattribution is diagnosable in one line
+- [x] Web UI: /api/goals GET/POST, topbar goal chip (green=pinned, amber=auto), panel with catalog + custom pin, live chip update on chat-set goals
+- [x] Gemini retaught: "web design clients" is WHO we target, not WHAT we sell
+
+### Phase 9: Filter Intelligence — universal gate + history loop ✅ Complete (2026-09-24)
+- [x] Rebuilt the auditorium/university/building patch-pile into ONE deterministic gate: `icp._not_an_organization()` — the noun-phrase TAIL is the head noun ("University Hostel 3" is a hostel), comma segments checked individually, strong venue words anywhere with an operator-noun escape ("Red Town Hall Cafe" survives)
+- [x] Corpus regression test: 16 non-customer entities (venues, civic buildings, campus structures, grounds, gates) + 6 must-stays in one block
+- [x] brain.learn_icp_feedback counts `judged` per institution type (denominators for real conversion rates)
+- [x] icp.learned_type_rates (MIN_TYPE_SAMPLE=8): ≥50% → +5, <20% → −5, middling silent; every adjustment carries a visible "history: N% of judged..." reason
+- [x] rank() report names best-converting types; scout/strategist/analyst prompts carry a per-goal "WHAT PAST SESSIONS TAUGHT US" block
+- [x] Adversarial review (2026-09-24): contraction gap ("i'm selling X"), "i now sell X" guard miss, `goal <search>` overreach, self-contradicting goal-switch prompt line + deterministic shape-gate backstop at the emit site, silent-dead-end fall-through, int→round % truncation ×5, learned_type_rates("") CAD-fallback contamination, stale util.js?v=28 double-load (all fixed; assets → v39)
+
 ## Decisions Made
 | Decision | Rationale |
 |----------|-----------|
@@ -66,6 +82,10 @@ Functional end to end and live-proven (2026-09-21): Gemini-first chatbot, agent-
 | FastAPI for web UI (not Flask) | Native WebSocket support, async |
 | action_dispatch as single entry point | Eliminates 3-way duplication across chat/menu/web |
 | Category filtering is post-search | Overpass returns all categories; filter after |
+| Goal = pinned state, never per-search inference | "i sell websites" as a standing misbelief came from wording guesses; user state must outrank the parser |
+| Place-name gate is goal-independent grammar, not per-goal name lists | One universal rule kills every future structure-record leak; per-goal lists need a new patch per leak family |
+| History adjusts scores only WITH a visible reason | Learning that silently biases ranking is indistinguishable from a bug |
+| AI goal-calls pass a deterministic shape gate | Prompt rules alone demonstrably failed live: Gemini fired set_selling_goal on 'goal keeper gloves supplier' |
 
 ## Errors Encountered
 | Error | Attempt | Resolution |
@@ -80,6 +100,13 @@ Functional end to end and live-proven (2026-09-21): Gemini-first chatbot, agent-
 | OSM has no emails for small-town institutions | 1 | Accepted: contact-finder+exec pass run, rest flagged; Phase 7 adds Maps provider |
 | WS dry-run false negative (frame budget) | 2 | Boot frames replay+queue_state arrive after welcome; read-until-marker instead of fixed counts |
 | /api/campaign served stale fake gate | 1 | resume_latest() only sees registered sessions — wrote session.json for the campaign session |
+| Goal fastpath missed contractions ("i'm selling X") | 1 | Regex required a SPACE before 'm/'re; restructured with apostrophe forms as their own alternative |
+| "goal keeper gloves supplier" pinned a goal | 2 | _GOAL_PREFIX_RE allowed bare whitespace; then Gemini's own tool call repeated it — prompt line rewritten + shape gate at emit |
+| My own prompt told Gemini to switch goals on product-named searches | 1 | Self-contradiction with the never-guess rule; model resolved it wrong live. Rewritten + deterministic backstop |
+| Backstop emptied the action list on goal-only misfires | 1 | Return [] is a silent dead end; fall through to the text reply instead |
+| 0.29 displayed as 28% | 1 | int(rate*100) truncates float multiply; round() in all 5 sites |
+| learned_type_rates("") returned CAD history | 1 | Empty key must return {} — fallback leaked one goal's history into another |
+| util.js loaded twice (v=28 + v=38) | 1 | 3 sub-imports pinned at old version; bump ALL asset URLs together on content change (v39) |
 
 ## Next Step
-Await user direction on Phase 7 (hardening) — recommended first move: Outscraper/Apify key setup to fix the small-town contact gap.
+Await user direction. Recommended next moves: (a) Phase 7 hardening (Outscraper/Apify key for the small-town contact gap), or (b) let the history loop accumulate a few live searches, then evaluate whether type-rate bonuses measurably improve kept-list quality before adding per-location rates or decay.

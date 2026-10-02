@@ -47,6 +47,7 @@ def dispatch(action_type: ActionType, params: dict, session) -> dict:
         ActionType.ASK_AGENT: lambda: _handle_ask_agent(params, session),
         ActionType.TEAM_ACT: lambda: _handle_team_act(session),
         ActionType.CAMPAIGN: lambda: _handle_campaign(params, session, sender),
+        ActionType.GOAL: lambda: handle_goal(params),
     }
 
     handler = handlers.get(action_type)
@@ -64,6 +65,48 @@ def dispatch(action_type: ActionType, params: dict, session) -> dict:
         "success": False,
         "message": f"Unknown action: {action_type.value}",
         "data": {},
+        "live_events": [],
+    }
+
+
+def handle_goal(params: dict) -> dict:
+    """Set/clear/switch what JARVIS is selling (icp.py owns the keys)."""
+    from agents.config import set_active_goal
+    from agents import icp
+
+    raw = (params.get("goal") or "").strip()
+    if not raw:
+        set_active_goal("")
+        return {
+            "success": True,
+            "message": "Goal cleared — I'll infer what we're selling "
+                       "from each search again.",
+            "data": {"goal": None, "goal_label": "auto"},
+            "live_events": [],
+        }
+
+    if icp.known_goal_key(raw):
+        store = raw.strip().lower()
+        label = icp.goal_of(store)["label"]
+    else:
+        # A phrase ("i sell web design services") maps to its saved goal via
+        # the same matcher searches use.
+        goal_obj = icp.resolve_goal(explicit=raw)
+        if goal_obj["key"] != "custom":
+            store, label = goal_obj["key"], goal_obj["label"]
+        else:
+            # No taxonomy for this product: pin the user's own phrase. The
+            # profile product is the stable identity and stays untouched —
+            # the active goal is the mutable overlay on top of it.
+            store, label = raw[:80], raw[:80]
+
+    set_active_goal(store)
+
+    return {
+        "success": True,
+        "message": f"Goal set: {label}. Searches, drafts and research now "
+                   "run against it until you change it.",
+        "data": {"goal": store, "goal_label": label},
         "live_events": [],
     }
 
@@ -113,11 +156,16 @@ def _handle_search(params: dict, session, sender: str) -> dict:
     phones_csv = report.get("phones_csv", "")
     enrich = report.get("enrich", {})
     if enrich.get("method") == "maps_fallback":
-        emails_found = enrich.get("enriched", 0)
+        emails_found = enrich.get("enriched_count", 0)
         phones_found = enrich.get("phone_found", 0)
         message += (f". Maps fallback found emails for {emails_found} "
                     f"and phones for {phones_found}")
-        if emails_found == 0 and phones_found == 0:
+        v2 = enrich.get("enrich_v2") or {}
+        if v2.get("searched"):
+            message += (f". Deep enrichment: {v2.get('deliverable', 0)} deliverable "
+                        f"email(s), {v2.get('whatsapp', 0)} WhatsApp-ready "
+                        f"phone(s) ({v2.get('cache_hits', 0)} from cache)")
+        elif emails_found == 0 and phones_found == 0:
             message += (" — nothing usable this time (Google did not surface "
                         "contact info; WhatsApp messaging will need another source)")
     if phones_csv:

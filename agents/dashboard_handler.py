@@ -94,7 +94,14 @@ def run_learning_dashboard():
     # AI Status
     print(f"\n  {C.BOLD}AI Status{C.RESET}")
     from agents import ai_engine
-    if ai_engine.is_available():
+    from agents.ai import providers
+    st = providers.status()
+    if st["active"]:
+        p(f"  Provider:    {C.GREEN}{st['provider']}{C.RESET} (routing all AI calls)")
+        p(f"  Model:       {st['model'] or '(unset)'}", C.DIM)
+        if ai_engine.is_available():
+            p(f"  Fallback:    Gemini online ({get_ai_model()})", C.DIM)
+    elif ai_engine.is_available():
         p(f"  Gemini AI:   {C.GREEN}ONLINE{C.RESET} (emails + websites generated)")
         p(f"  Model:       {get_ai_model()}", C.DIM)
     else:

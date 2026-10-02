@@ -23,6 +23,24 @@ Thumbs.db
 *.log
 .freebuff/
 
+# Scratch / runtime artifacts (probe dumps, server pids, screenshots)
+_*.txt
+_*.json
+_*.bat
+.freebuffpreview-*
+server.pid
+server_pid.txt
+*.log.err
+rakshanet/_static.*
+rakshanet/backend/_api.*
+rakshanet/backend/relief_state.json
+/*.png
+du_e.txt
+kavach_hero_preview.html
+nivox_*.html
+pdf_check.html
+calculus-visualizations.html
+
 # Memory DB (user data)
 agent_output/memory/
 agent_output/knowledge_base/

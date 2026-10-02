@@ -201,6 +201,60 @@ body.is-resizing .grip::before { background: var(--wood-deep); width: 6px; }
 }
 .icon-btn:hover { background: var(--paper-deep); border-color: var(--ink); }
 
+/* ── Selling-goal chip + panel ───────────────────────────────── */
+.goal-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: 2px solid var(--line-warm);
+  border-radius: 4px;
+  background: var(--paper);
+  padding: 3px 10px;
+  font-family: var(--body-font);
+  font-size: 15px;
+  color: var(--ink);
+  cursor: pointer;
+  max-width: 260px;
+}
+.goal-chip:hover { background: var(--paper-deep); border-color: var(--ink); }
+.goal-chip .goal-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+  background: var(--amber-warn);
+}
+.goal-chip.pinned .goal-dot { background: var(--green-ok); }
+.goal-chip span {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.goal-panel { width: 340px; }
+.goal-body { display: flex; flex-direction: column; gap: 8px; }
+.goal-option {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  border: 2px solid var(--line-warm);
+  border-radius: 4px;
+  background: var(--paper);
+  padding: 8px 10px;
+  font-family: var(--body-font);
+  font-size: 15px;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.goal-option:hover { background: var(--paper-deep); border-color: var(--ink); }
+.goal-option.is-active { border-color: var(--green-ok); background: var(--paper-deep); }
+.goal-option .goal-set { font-size: 12px; color: var(--ink-soft); flex: 0 0 auto; }
+.goal-custom-row { display: flex; gap: 6px; }
+.goal-custom-row input {
+  flex: 1 1 auto; min-width: 0;
+  font-family: var(--body-font); font-size: 15px;
+  border: 2px solid var(--line-warm); border-radius: 4px;
+  background: var(--paper); color: var(--ink); padding: 6px 8px;
+}
+.goal-custom-row button {
+  font-family: var(--body-font); font-size: 15px;
+  border: 2px solid var(--line-warm); border-radius: 4px;
+  background: var(--paper); color: var(--ink); padding: 6px 10px; cursor: pointer;
+}
+.goal-custom-row button:hover { background: var(--paper-deep); border-color: var(--ink); }
+.goal-note { font-size: 13px; color: var(--ink-soft); }
+
 /* ── The office floor ────────────────────────────────────────── */
 
 .floor {
@@ -1539,16 +1593,18 @@ select.btn {
   .station-enricher { left: 56%; }   /* clear of builder's right-anchored desk */
   .ops-feed { height: 60px; font-size: 14px; }  /* stop the feed swallowing the short floor */
   .bot-tag { display: none; }
-
-/* Narrow floor (splitter dragged left): same declutter as mobile —
-   the 6px name pills are wider than their 30px bots and clip hard at
-   the room border. Station zone labels stay (they fit; bots re-dock). */
-.room.is-narrow .bot-tag { display: none; }
   /* Buy the chat list room from the decorative chrome. No fixed min-height on
      .messages: it is flex:1 with min-height:0 so it yields before the composer
      does, and a floor here would clip the send button on a very short window. */
   .cmd-stats { display: none; }
 }
+
+/* Narrow floor (splitter dragged left, desktop widths): same declutter as
+   mobile — the 6px name pills are wider than their 30px bots and clip hard
+   at the room border. Station zone labels stay (they fit; bots re-dock).
+   Lives OUTSIDE the max-width media query: the dragged-narrow floor happens
+   at desktop widths, where that query doesn't apply. */
+.room.is-narrow .bot-tag { display: none; }
 
 /* ── View transitions (native API; unsupported browsers skip) ─────
    State changes worth animating, in the skill's priority order:
@@ -1614,3 +1670,59 @@ select.btn {
   text-decoration: underline;
   font-weight: bold;
 }
+
+/* ── Key vault panel ─────────────────────────────────────────────── */
+.vault-panel { width: 340px; }
+.vault-body { font-size: 15px; }
+.vault-note {
+  margin: 2px 0 10px; color: var(--ink-soft); font-size: 14px; line-height: 1.45;
+}
+.vault-open-note { color: var(--green-ok, #4a7c59); font-weight: bold; }
+.vault-form { display: flex; flex-direction: column; gap: 8px; }
+.vault-input {
+  font-family: inherit; font-size: 15px; color: var(--ink);
+  background: var(--paper); border: 2px solid var(--ink);
+  border-radius: 4px; padding: 7px 9px; outline: none;
+}
+.vault-input:focus { border-color: var(--accent); box-shadow: 2px 2px 0 var(--accent-soft); }
+.vault-btn {
+  font-family: var(--pixel-font); font-size: 9px; color: var(--paper);
+  background: var(--moss-deep); border: 2px solid var(--ink);
+  border-radius: 4px; padding: 7px 10px; cursor: pointer;
+  box-shadow: 2px 2px 0 rgba(61,53,41,.3);
+}
+.vault-btn:hover { filter: brightness(1.07); }
+.vault-btn:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 rgba(61,53,41,.3); }
+.vault-btn-ghost {
+  background: var(--panel); color: var(--ink); border-style: dashed;
+}
+.vault-err { min-height: 18px; margin: 8px 0 0; color: #a04b2f; font-size: 13px; }
+.vault-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 0; border-bottom: 1px dashed var(--line);
+}
+.vault-label { flex: 1; color: var(--ink); }
+.vault-src {
+  font-size: 10px; color: var(--ink-soft); border: 1px solid var(--line-warm);
+  border-radius: 3px; padding: 0 3px;
+}
+.vault-value { color: var(--ink-soft); font-size: 13px; word-break: break-all; }
+.vault-eye {
+  font-size: 13px; background: var(--paper); border: 1px solid var(--ink);
+  border-radius: 3px; padding: 2px 5px; cursor: pointer; max-width: 220px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.vault-eye-open { font-family: monospace; font-size: 12px; color: var(--ink); }
+.vault-ttl { font-weight: normal; color: var(--ink-soft); }
+.vault-actions { display: flex; gap: 8px; margin-top: 12px; }
+.vault-log-row { font-size: 13px; gap: 8px; }
+.vault-log-kind {
+  font-family: var(--pixel-font); font-size: 7px; text-transform: uppercase;
+  background: var(--paper-deep); border: 1px solid var(--line-warm);
+  border-radius: 3px; padding: 2px 4px; white-space: nowrap;
+}
+.vault-log-reveal { background: var(--accent-soft); }
+.vault-log-lockout { background: #e8b4a0; }
+.vault-log-unlock { background: var(--moss-floor); }
+.vault-log-detail { flex: 1; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vault-log-time { color: var(--ink-soft); font-size: 11px; white-space: nowrap; }

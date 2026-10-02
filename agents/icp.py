@@ -31,6 +31,9 @@ NOT_A_PRODUCT = (
     "toilets", "shelter", "bench", "waste_basket", "drinking_water", "fountain",
     "parking", "fuel", "bus_station", "taxi", "bicycle_parking", "recycling",
     "post_box", "telephone", "clock", "atm", "grave_yard", "prison",
+    # civic/venue tags (Kolkata failure: an auditorium on a college campus
+    # inherited the campus's college tag and scored as a customer)
+    "library", "auditorium", "planetarium", "arts_centre", "community_centre",
 )
 
 EDUCATION_TAGS = (
@@ -125,6 +128,119 @@ _CAD_NEVER_NAMES = (
     "salon", "parlour", "spa", "tailors", "boutique", "gym", "fitness",
     "petrol", "fuel", "garage", "motors", "tyres", "automobiles",
 )
+# NOTE: venue names (auditorium, library, bhawan, ...) are NOT listed here —
+# they were a CAD-specific patch over a universal problem. "Is this name an
+# organization at all?" is answered below by _not_an_organization() for every
+# goal; this list stays for what it actually means: kinds of business that
+# cannot buy CAD licences.
+
+# ── Not-an-organization gate (universal, goal-independent) ───────────
+# Every leaked "prospect" so far — Father Depelchin Auditorium, Central
+# Library, Ambedkar Bhawan, B. K. Paul's Institution Ground, Duff Building,
+# SCC - Main Building — is ONE thing: a name for a PLACE, VENUE, or
+# STRUCTURE, not an organization. OSM maps all of these (campus buildings
+# even inherit the campus's college tag), and none of them can buy anything
+# for any goal. One gate for the whole class instead of a patch per leak;
+# the whole class is pinned as a corpus in agents/test_category_exclusions.py.
+
+# Compound heads: a place even when an org word sits inside the name
+# ("B. K. Paul's Institution Ground" contains 'institution' — still a ground).
+_PLACE_HEAD_COMPOUNDS = (
+    "institution ground", "college ground", "college playground",
+    "university ground", "school ground", "university library",
+    "college library", "central library", "public library", "town hall",
+)
+
+# Head nouns: a name ENDING in one of these is a place — the noun-phrase
+# tail IS the head noun, so "University Hostel 3" is a hostel even though a
+# university owns it (the university has its own record; keeping structure
+# records double-counts the campus).
+_PLACE_HEADS = (
+    # venues / cultural
+    "auditorium", "library", "bhawan", "bhavan", "planetarium", "museum",
+    "art gallery", "gallery", "community hall", "exhibition hall",
+    "concert hall", "hall",
+    # structures (campus buildings, OSM way "Duff Building")
+    "building", "block", "annex", "annexe", "wing", "hostel",
+    "hall of residence", "quarters", "staff quarters", "premises",
+    # grounds & open places
+    "ground", "grounds", "playground", "sports ground", "football ground",
+    "cricket ground", "stadium", "park", "garden", "maidan",
+    # infrastructure / landmarks
+    "gate", "parking", "parking lot", "depot", "station", "terminal",
+    "bridge", "flyover", "ghat", "monument", "memorial", "cemetery",
+)
+
+# Strong venue words checked ANYWHERE in the name: they catch venues carrying
+# a tenant label ("Ambedkar Bhawan - Cultural Research Institute") whose tail
+# would otherwise look like an organization. Only a real OPERATOR noun saves
+# the name (see _OPERATOR_NOUNS).
+_STRONG_PLACE_WORDS = ("auditorium", "bhawan", "bhavan", "planetarium",
+                       "museum", "town hall")
+
+# Organization nouns: evidence the name names an operator, not a place.
+_ORG_NOUNS = (
+    "college", "university", "institute", "institution", "school",
+    "academy", "vidyalaya", "vidyapith", "company", "co.", "ltd",
+    "limited", "pvt", "private", "llp", "traders", "enterprises",
+    "industries", "agency", "associates", "consultancy", "consultants",
+    "services", "solutions", "systems", "technologies", "labs", "lab",
+    "studio", "workshop", "centre", "center", "trust", "society",
+    "foundation", "hospital", "clinic", "nursing home", "hotel",
+    "restaurant", "store", "shop", "mart", "bank", "office", "firm",
+    "group", "corporation", "motors", "cafe",
+)
+
+# Operator nouns for the anywhere-rule: 'institute'/'institution'/'centre'/'
+# 'group' are excluded because venue labels borrow them ("Cultural Research
+# Institute" inside a bhawan's name) while a real operator almost always also
+# names what it does (training, computer, CADD, ...).
+_WEAK_ORG_NOUNS = ("institute", "institution", "centre", "center", "group")
+_OPERATOR_NOUNS = tuple(o for o in _ORG_NOUNS if o not in _WEAK_ORG_NOUNS)
+
+
+def _clean_tail(name: str) -> str:
+    """Drop trailing numbering so 'block - 3' / 'wing c' still end at the head."""
+    name = re.sub(r"[\s\-\.#]*\bno\.?\s*[\d]+[a-z]?$", "", name)
+    name = re.sub(r"[\s\-]+[\d]+[a-z]?$", "", name)
+    name = re.sub(r"[\s\-]+[a-z]$", "", name)
+    return name.strip(" -.,#")
+
+
+def _ends_with_head(name: str, head: str) -> bool:
+    return re.search(r"(^|\b)" + re.escape(head) + r"\b[^a-z]*$", name) is not None
+
+
+def _has_org_noun(name: str, nouns: tuple[str, ...]) -> bool:
+    return any(re.search(r"\b" + re.escape(o) + r"\b", name) for o in nouns)
+
+
+def _not_an_organization(name: str) -> str | None:
+    """The place word that makes this name a non-customer, or None.
+
+    Grammar carries the verdict: in a noun phrase the TAIL is the head noun,
+    so what a name ENDS in is what the thing IS. "University Hostel 3" is a
+    hostel; "St. Xaviers College Main Building" is a building — the college
+    owns it, but the record is still a structure (the college itself has its
+    own record; keeping these double-counts). Each comma segment is checked
+    ("Main Gate, Rajabazar Campus" hides 'gate' before the comma). Only the
+    strong-word ANYWHERE rule yields to operator nouns: a cafe named after a
+    landmark ("Red Town Hall Cafe") is an operating business.
+    """
+    name = _clean_tail(name)
+    segments = [s for s in re.split(r"[,;]", name) if s.strip()] or [name]
+    for seg in segments:
+        seg = _clean_tail(seg.strip())
+        for compound in _PLACE_HEAD_COMPOUNDS:
+            if _ends_with_head(seg, compound):
+                return compound
+        for head in _PLACE_HEADS:
+            if _ends_with_head(seg, head):
+                return head
+    for word in _STRONG_PLACE_WORDS:
+        if re.search(r"\b" + re.escape(word) + r"\b", name):
+            return None if _has_org_noun(name, _OPERATOR_NOUNS) else word
+    return None
 
 # ── Goal: websites / web design ─────────────────────────────────────
 # Buyers are real local businesses that need a better presence, so the
@@ -253,37 +369,66 @@ def goal_of(key: str) -> dict:
     return GOALS.get((key or "").strip().lower(), GOALS["custom"])
 
 
+def known_goal_key(key: str) -> bool:
+    """Is this a saved goal key (usable for pinning the active goal)?"""
+    return (key or "").strip().lower() in GOALS
+
+
 def resolve_goal(request: str = "", explicit: str = "") -> dict:
     """Work out which goal this search is for.
 
-    Order: an explicit goal key, then the user's own search phrasing, then the
-    business profile's product. Falls back to the custom goal, which judges
+    Order: an explicit goal key, then the user's PINNED goal ("i sell X" /
+    the goal chip), then the search's own phrasing, then the business
+    profile's product. Falls back to the custom goal, which judges
     only "is this a contactable business" instead of misapplying a taxonomy
     for something we are not selling.
+
+    The returned dict is a copy stamped with ``_source`` (explicit | active
+    goal | search wording | profile product | custom) so reports can say
+    WHERE the goal came from.
     """
+    def _stamped(goal: dict, source: str) -> dict:
+        return {**goal, "_source": source}
+
     explicit = (explicit or "").strip().lower()
     if explicit:
         if explicit in GOALS:
-            return GOALS[explicit]
+            return _stamped(GOALS[explicit], "explicit")
         # An explicit goal may itself be a phrase ("web design clients").
         hit = _goal_from_text(explicit)
         if hit:
-            return hit
+            return _stamped(hit, "explicit")
         # They told us what they are selling and we have no taxonomy for it:
         # use it as a custom goal rather than pretending it is the saved product.
-        return _custom_goal(explicit)
+        return _stamped(_custom_goal(explicit), "explicit")
+
+    # The user's PINNED goal ("i sell autocad keys" / the goal chip) outranks
+    # what this search's wording resembles: 'web design clients in pune' says
+    # WHO we target, not WHAT we sell.
+    try:
+        from agents.config import get_active_goal
+        active = (get_active_goal() or "").strip().lower()
+    except Exception:
+        active = ""
+    if active:
+        if active in GOALS:
+            return _stamped(GOALS[active], "active goal")
+        hit = _goal_from_text(active)
+        if hit:
+            return _stamped(hit, "active goal")
+        return _stamped(_custom_goal(active), "active goal")
 
     hit = _goal_from_text(request or "")
     if hit:
-        return hit
+        return _stamped(hit, "search wording")
 
     profile_product = (target_profile().get("product")
                        or target_profile().get("what_we_sell") or "")
     hit = _goal_from_text(profile_product)
     if hit:
-        return hit
+        return _stamped(hit, "profile product")
 
-    return _custom_goal(request or profile_product)
+    return _stamped(_custom_goal(request or profile_product), "custom")
 
 
 def _custom_goal(label: str) -> dict:
@@ -342,7 +487,8 @@ def product_line(goal: dict | None = None) -> str:
 # ── Classification ───────────────────────────────────────────────────
 
 def classify(business: dict, goal: dict | None = None,
-             stats: dict | None = None) -> dict:
+             stats: dict | None = None,
+             type_rates: dict[str, float] | None = None) -> dict:
     """Judge one business against one goal.
 
     Returns {fit, fit_score, institution_type, fit_reasons, disqualifiers,
@@ -377,6 +523,16 @@ def classify(business: dict, goal: dict | None = None,
         if _name_has(name, bad):
             verdict.update(fit_score=18, disqualifiers=[f"name says '{bad}'"])
             return verdict
+
+    # Universal non-customer gate: a name for a PLACE, VENUE, or STRUCTURE
+    # (auditorium, library, bhawan, campus building, playground…) is not an
+    # organization and cannot buy — for ANY goal. Runs before scoring so a
+    # campus tag inheritance can never make a place look like a prospect.
+    place = _not_an_organization(name)
+    if place:
+        verdict.update(fit_score=18,
+                       disqualifiers=[f"name describes a place ('{place}'), not a business"])
+        return verdict
 
     # Best matching vertical: the highest base among those that match.
     matched = []
@@ -435,6 +591,24 @@ def classify(business: dict, goal: dict | None = None,
                 score += 5
                 reasons.append(f"'{sig}' has mostly led to fits ({st.get('fits', 0)}x)")
 
+    # Type-conversion history: when this institution type has a real track
+    # record for THIS goal (>= MIN_TYPE_SAMPLE judged), let it move the score
+    # a little - always WITH its reason, so the officer sees the learning.
+    if type_rates is None:
+        type_rates = learned_type_rates(goal["key"])
+    rate = (type_rates or {}).get(spec["label"])
+    if rate is not None:
+        # Strong rates lift, weak rates drag, middling rates are neutral -
+        # a mediocre conversion record is not evidence in either direction.
+        if rate >= 0.5:
+            score += 5
+            reasons.append(f"history: {round(rate * 100)}% of judged "
+                           f"'{spec['label']}' were a fit")
+        elif rate < 0.2:
+            score -= 5
+            reasons.append(f"history: only {round(rate * 100)}% of judged "
+                           f"'{spec['label']}' were a fit")
+
     score = max(0, min(100, score))
     fit = ("fits" if score >= goal["fit_threshold"]
            else "plausible" if score >= goal["plausible_threshold"]
@@ -449,8 +623,9 @@ def classify_all(businesses: list[dict], goal: dict | None = None) -> list[dict]
     """Attach a verdict to every business (mutates and returns the list)."""
     goal = goal or resolve_goal()
     stats = learned_signal_stats(goal["key"])
+    type_rates = learned_type_rates(goal["key"])
     for biz in businesses:
-        biz["icp"] = classify(biz, goal=goal, stats=stats)
+        biz["icp"] = classify(biz, goal=goal, stats=stats, type_rates=type_rates)
     return businesses
 
 
@@ -461,7 +636,24 @@ def rank(businesses: list[dict], goal: dict | None = None,
     Returns (kept, dropped, report, summary).
     """
     goal = goal or resolve_goal()
-    classify_all(businesses, goal=goal)
+    # Memory: businesses this goal already rejected STRUCTURALLY keep their
+    # verdict without being re-judged (judging them again can never differ),
+    # and they stay out of the learned-rate denominators they would only
+    # inflate. Verdicts may still be re-learned (brain upserts); rejections
+    # can never expire because they cannot un-happen.
+    memory = known_rejections(goal["key"])
+    fresh: list[dict] = []
+    remembered = 0
+    for b in businesses:
+        reason = memory.get((b.get("name") or "").strip())
+        if reason is None:
+            fresh.append(b)
+            continue
+        remembered += 1
+        b["icp"] = {"fit": "unlikely", "fit_score": 0, "institution_type": "Rejected (memory)",
+                    "fit_reasons": [], "disqualifiers": [f"{reason} (known rejection)"],
+                    "matched_signals": [], "goal": goal["key"]}
+    classify_all(fresh, goal=goal)
     ordered = sorted(businesses,
                      key=lambda b: (-b["icp"]["fit_score"], b.get("name", "").lower()))
     kept = [b for b in ordered if keep_unlikely or b["icp"]["fit"] != "unlikely"]
@@ -475,6 +667,27 @@ def rank(businesses: list[dict], goal: dict | None = None,
     fits = sum(1 for b in kept if b["icp"]["fit"] == "fits")
     plausible = sum(1 for b in kept if b["icp"]["fit"] == "plausible")
     product = product_line(goal)
+
+    # History, stated only when it exists: which types this goal's own past
+    # searches converted best, so the ranking's 'why' includes the learning.
+    # Skipped re-litigations are stated too — memory you can't see looks
+    # identical to a bug that silently drops results.
+    history_line = ""
+    try:
+        if remembered:
+            history_line += (f"Memory: {remembered} previously rejected "
+                             "business(es) skipped without re-judging. ")
+        rates = learned_type_rates(goal["key"])
+        if rates:
+            best = sorted(rates.items(), key=lambda kv: -kv[1])[:2]
+            if best and best[0][1] > 0:
+                history_line += ("History: best conversion from "
+                                + ", ".join(f"{k.lower()} ({round(v * 100)}%)"
+                                            for k, v in best)
+                                + f" across {sum(1 for b in businesses)} judged this run.")
+    except Exception:
+        history_line = ""
+
     summary = {
         "goal": goal["key"],
         "goal_label": goal["label"],
@@ -503,6 +716,8 @@ def rank(businesses: list[dict], goal: dict | None = None,
         report = (f"ICP [{goal['label']}] kept {len(kept)}/{len(businesses)} for "
                   f"\"{product}\" ({fits} direct fits, {plausible} plausible) - {types}; "
                   f"dropped {len(dropped)} ({dropped_txt}).")
+        if history_line:
+            report = f"{report} {history_line}"
     summary["report"] = report
     return kept, dropped, report, summary
 
@@ -518,6 +733,59 @@ def learned_signal_stats(goal_key: str = "") -> dict:
                 .get("signal_stats") or {})
     except Exception:
         return {}
+
+
+MIN_TYPE_SAMPLE = 8
+
+
+def known_rejections(goal_key: str = "") -> dict[str, str]:
+    """name -> first disqualifier, from this goal's real history.
+
+    Only STRUCTURAL rejections are memory-worthy: a pharmacy is always a
+    pharmacy ("tagged pharmacy"), so re-judging it can never differ. A weak
+    score rejection is a threshold opinion — tomorrow's search (new goal
+    product, learned signals, history bonus) could clear it, so it is not
+    remembered and gets judged fresh every time. Empty map = nothing remembered.
+    """
+    try:
+        from agents.brain import get_brain
+        rejected = get_brain().get_rejected_names(goal_key or "")
+    except Exception:
+        return {}
+    return {name: reason for name, reason in rejected.items()
+            if reason.startswith(("tagged ", "name says ", "name describes ",
+                                  "no signal"))}
+
+
+def learned_type_rates(goal_key: str = "") -> dict[str, float]:
+    """institution_type -> conversion rate (fits/judged) from real history.
+
+    Only types with MIN_TYPE_SAMPLE judged businesses earn a rate - below
+    that the sample says more about where we searched than what converts.
+    An empty goal_key returns {} by design: guessing CAD here would leak one
+    goal's history into another's ranking.
+    """
+    if not goal_key:
+        return {}
+    try:
+        from agents.brain import get_brain
+        types = ((get_brain().get_icp().get("by_goal") or {})
+                 .get(goal_key, {})
+                 .get("type_stats") or {})
+    except Exception:
+        return {}
+    rates = {}
+    for label, ts in types.items():
+        judged = ts.get("judged", 0)
+        fits = ts.get("fits")
+        if fits is None:
+            # Pre-epoch entry: all-time ``seen`` vs since-tracking ``judged``
+            # — the rate would be nonsense (819/26 = 3150%), so it is silent
+            # until enough fresh searches re-base it.
+            continue
+        if judged >= MIN_TYPE_SAMPLE:
+            rates[label] = round(fits / judged, 2)
+    return rates
 
 
 def learn(businesses: list[dict], goal: dict | None = None) -> None:

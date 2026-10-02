@@ -801,8 +801,24 @@ def ask_agent(key: str, message: str, chat_history: list[dict] = None,
     # get advice about lab software licences.
     icp_block = ""
     try:
-        from agents.icp import context as icp_context, resolve_goal
-        icp_block = icp_context(resolve_goal(explicit=goal))
+        from agents.icp import context as icp_context, resolve_goal, learned_type_rates
+        goal_obj = resolve_goal(explicit=goal)
+        icp_block = icp_context(goal_obj)
+        # What THIS goal's own history taught: which types actually converted.
+        # Rates only (min sample enforced in learned_type_rates), never vibes.
+        rates = learned_type_rates(goal_obj["key"])
+        if rates:
+            best = sorted(rates.items(), key=lambda kv: -kv[1])[:4]
+            judged = sorted(rates.items(), key=lambda kv: kv[1])[:2]
+            learned_lines = ["WHAT THIS GOAL'S PAST SESSIONS TAUGHT US:"]
+            learned_lines.append("  Types that converted best: "
+                                 + ", ".join(f"{k} ({round(v * 100)}%)" for k, v in best))
+            if judged and judged[-1][1] < 0.35:
+                learned_lines.append("  Types that rarely converted: "
+                                     + ", ".join(f"{k} ({round(v * 100)}%)" for k, v in judged))
+            learned_lines.append("  Use this to pick hooks - but judge the specific "
+                                 "business in front of you first.")
+            icp_block = f"{icp_block}\n\n" + "\n".join(learned_lines)
     except Exception:
         pass
 

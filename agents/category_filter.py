@@ -46,6 +46,8 @@ EXCLUSION_LEXICON = {
     "universities": {"tags": ("university", "college"),
                      "names": ("university", "college")},
     "polytechnic": {"tags": ("college",), "names": ("polytechnic",)},
+    "auditorium": {"tags": ("auditorium",), "names": ("auditorium", "bhawan", "sabha")},
+    "library": {"tags": ("library",), "names": ("library", "granthaghar")},
     "engineering college": {"tags": (), "names": ("engineering college",
                                                   "college of engineering",
                                                   "institute of technology",
@@ -109,7 +111,20 @@ def extract_exclusions(category: str) -> tuple[list[str], str]:
         seg = ban_seg_split.split(seg)[0]
         for item in item_split.split(seg):
             item = item.strip(" .!?")
-            if item:
+            if not item:
+                continue
+            if item in EXCLUSION_LEXICON or item in _KEYWORD_TYPOS or item[:-1] in EXCLUSION_LEXICON:
+                excluded.append(item)
+                continue
+            # Space-separated ban lists ("remove schools colleges auditoriums")
+            # arrive as ONE whitespace-joined "item" that matches nothing. A
+            # non-lexicon multi-word item is therefore a LIST the separators
+            # didn't catch: split it into words. Known multi-word lexicon
+            # entries ("engineering college") never reach this branch.
+            words = [w.strip(" .!?") for w in item.split() if w.strip(" .!?")]
+            if len(words) > 1:
+                excluded.extend(words)
+            else:
                 excluded.append(item)
     if segments[0].strip():
         keep_parts.append(segments[0].strip(" ,."))
@@ -124,12 +139,25 @@ _KEYWORD_TYPOS = {"cllgs": "cllg", "clgs": "cllg", "clge": "college",
 
 def _exclusion_hit(business: dict, keywords: list[str]) -> str:
     """Return the keyword that bans this business, or ''. Tag OR name match."""
+    import re as _re
     tag = (business.get("category") or "").lower()
     name = (business.get("name") or "").lower()
+    # The FULL tag blob, not just the category string: Shri Shikshayatan
+    # carries no ban token in its name or category, but its OSM tags say
+    # amenity=school - Stage 0 must see what the ICP sees, or a user's
+    # "remove schools" silently misses campus-tagged entities.
+    tags = business.get("tags") or {}
+    blob = " ".join([tag] + [f"{k} {v}" for k, v in tags.items()]).lower()
     for kw in keywords:
         lex = EXCLUSION_LEXICON.get(kw)
+        if lex is None and kw.endswith("ies"):
+            # -ies plural of a known ban word: "libraries" -> "library",
+            # "universities" -> "university" (plain -s stripping misses
+            # these: "libraries" -> "librarie" matches nothing)
+            lex = EXCLUSION_LEXICON.get(kw[:-3] + "y")
         if lex is None and kw.endswith("s"):
             # plural of a known ban word: "schools" -> "school"
+
             lex = EXCLUSION_LEXICON.get(kw[:-1])
         if lex is None:
             lex = EXCLUSION_LEXICON.get(_KEYWORD_TYPOS.get(kw, ""))
@@ -142,6 +170,12 @@ def _exclusion_hit(business: dict, keywords: list[str]) -> str:
             return kw
         if any(n in name for n in lex["names"]):
             return kw
+        # lexicon tokens against the full blob (word-boundary for single
+        # tokens so "school" fires on "amenity school" but not "schoolbag")
+        for t in lex["tags"] + lex["names"]:
+            if (" " in t and t in blob) or (" " not in t and
+                    _re.search(rf"\b{_re.escape(t)}\b", blob)):
+                return kw
     return ""
 
 
@@ -181,9 +215,15 @@ def filter_by_category(businesses: list[dict], category: str,
                 survivors.append(b)
         businesses = survivors
         if not businesses:
-            return [], (f"Filtered {len(excl_dropped)} -> 0 for \"{category}\": "
-                        f"user exclusion removed everything "
-                        f"({_fmt_counts(excl_dropped)}).")
+            if excl_dropped:
+                return [], (f"Filtered {len(excl_dropped)} -> 0 for \"{category}\": "
+                            f"user exclusion removed everything "
+                            f"({_fmt_counts(excl_dropped)}).")
+            # Zero businesses ARRIVED here — the exclusions removed nothing.
+            # Blaming the user's phrasing for an upstream empty was a lie that
+            # read as "your query is wrong" when really the search found none.
+            return [], (f"Filtered 0 -> 0 for \"{category}\": no businesses "
+                        f"reached the filter, so the exclusions removed nothing.")
 
     kill_tags = tuple(goal.get("never_tags") or ()) if goal else TAG_KILL_LIST
 
@@ -315,15 +355,21 @@ Return JSON: {{"fits": [numbers], "plausible": [numbers], "unlikely": [numbers]}
             for idx in unlikely:
                 biz = chunk[idx - 1]
                 # The goal verdict is the authority on "is this a customer":
-                # a business the ICP scored fits or plausible may not be
-                # dropped by this pass. (The ICP is deterministic and knows
-                # what we're selling; re-judging borderline prospects here
-                # with a fuzzy rubric made the same search keep 5 prospects
-                # on one run and 0 on the next.) Businesses with no ICP
-                # verdict are still this pass's to judge. Exclusions are the
-                # user's word and outrank even the ICP (stage 0 already
-                # removed those matches, so nothing here is a banned kind).
-                if (biz.get("icp") or {}).get("fit") in ("fits", "plausible"):
+                # a business the ICP scored a DIRECT FIT may not be dropped by
+                # this pass. (The ICP is deterministic and knows what we're
+                # selling; re-judging borderline prospects here with a fuzzy
+                # rubric made the same search keep 5 prospects on one run and
+                # 0 on the next.) "Plausible" is NOT enough to resurrect: the
+                # Kolkata run flood-filled the results with venues the AI had
+                # correctly dropped (auditorium, library, institutes' halls)
+                # because their campus carried a college tag -> ICP 55-70.
+                # Weak evidence loses to the AI's explicit "never a fit".
+                # Exclusions are the user's word and outrank even the ICP --
+                # enforced HERE as well as stage 0: the Calcutta University
+                # run had campuses resurrected at fit 85 because a ban-list
+                # parse miss left stage 0 blind. The veto re-checks the
+                # user's own ban words; a direct fit is NOT user authority.
+                if (biz.get("icp") or {}).get("fit") == "fits" and not _exclusion_hit(biz, exclusions):
                     kept.append(biz)
                     vetoed.append(biz)
                     continue

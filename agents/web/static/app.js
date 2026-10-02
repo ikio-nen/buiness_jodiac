@@ -11,13 +11,14 @@
 // The ?v= on each import is the same version as the document's app.js
 // tag: bump both together or a browser keeps serving an old module.
 import { esc, setActivity, clearActivityIfIdle, showQueuedChip, setWorkActive,
-         wrapAgentEvent } from './js/util.js?v=32';
-import { vtAppend, vtSwap } from './js/transitions.js?v=32';
-import { initQueue, renderQueue } from './js/queue.js?v=32';
-import { initAttachments, takeAttachment } from './js/attachments.js?v=32';
-import { initDictation } from './js/voice.js?v=32';
-import { initMusicCorner } from './js/music.js?v=32';
-import { renderChecklist, renderInterview, removeChecklistCard } from './js/campaign.js?v=32';
+         wrapAgentEvent } from './js/util.js?v=43';
+import { vtAppend, vtSwap } from './js/transitions.js?v=43';
+import { initQueue, renderQueue } from './js/queue.js?v=43';
+import { initAttachments, takeAttachment } from './js/attachments.js?v=43';
+import { initDictation } from './js/voice.js?v=43';
+import { initMusicCorner } from './js/music.js?v=43';
+import { renderChecklist, renderInterview, removeChecklistCard } from './js/campaign.js?v=43';
+import { initVault } from './js/vault.js?v=43';
 
 
 // ── WebSocket Connection ─────────────────────────────────────────
@@ -66,17 +67,36 @@ function sendFrame(obj) {
 }
 window.wsSend = sendFrame;
 
+// Last message is a welcome greeting with nothing new to say? Replace it.
+// Returns true when the caller should skip appending (greeting refreshed).
+function replaceWelcome(content) {
+  const last = messagesEl.lastElementChild;
+  const body = last && last.classList.contains('message-jarvis')
+    ? last.querySelector('.msg-content') : null;
+  if (body && /^JARVIS online/.test(body.textContent)) {
+    body.textContent = content;
+    scrollToBottom();
+    return true;
+  }
+  return false;
+}
+
 function handleMessage(data) {
   removeTypingIndicator();
-
   switch (data.type) {
     case 'jarvis':
       if (data.interview) {
         renderInterview(data.content);
+      } else if (data.welcome && replaceWelcome(data.content)) {
+        // Reconnect with nothing new said: refresh the existing greeting
+        // instead of appending a second one that reads as a reset.
       } else {
         addMessage('jarvis', data.content, data);
       }
       if (data.session_id) sessionInfo.textContent = data.session_id;
+      // A chat-set goal ("i sell X") lands here as action=goal — keep the
+      // chip honest without waiting for a reload.
+      if (data.action === 'goal') refreshGoalChip();
       break;
     case 'campaign_checklist':
       renderChecklist(data.data);
@@ -1448,6 +1468,107 @@ statusBtn.addEventListener('click', async () => {
 
 closeStatus.addEventListener('click', () => statusPanel.classList.remove('open'));
 
+// ── Selling-goal chip + panel ────────────────────────────────────
+// What JARVIS is selling is user state, not a guess — the chip shows it,
+// the panel pins/clears it, and searches run against the pin.
+
+const goalChip = document.getElementById('goalChip');
+const goalChipText = document.getElementById('goalChipText');
+const goalPanel = document.getElementById('goalPanel');
+const goalBody = document.getElementById('goalBody');
+
+function applyGoalState(data) {
+  if (!data || data.error) return;
+  goalChip.classList.toggle('pinned', !data.is_auto);
+  goalChipText.textContent = `Goal: ${data.is_auto ? 'auto' : (data.label || data.active)}`;
+  goalChip.title = data.is_auto
+    ? 'No goal pinned — JARVIS infers it per search. Click to pin one.'
+    : `Pinned: selling ${data.label}. Click to change or clear.`;
+  goalChip.setAttribute('aria-expanded', goalPanel.classList.contains('open') ? 'true' : 'false');
+}
+
+async function refreshGoalChip() {
+  try {
+    const res = await fetch('/api/goals');
+    applyGoalState(await res.json());
+  } catch (e) { /* chip keeps its last known state */ }
+}
+
+async function renderGoalPanel() {
+  goalBody.innerHTML = 'Loading…';
+  let data;
+  try {
+    const res = await fetch('/api/goals');
+    data = await res.json();
+  } catch (e) {
+    goalBody.innerHTML = '<div class="goal-note">Could not load goals.</div>';
+    return;
+  }
+  if (data.error) {
+    goalBody.innerHTML = `<div class="goal-note">${esc(data.error)}</div>`;
+    return;
+  }
+  applyGoalState(data);
+  const parts = [];
+  parts.push(`<div class="goal-note">Pin what JARVIS is selling. Searches, drafts and research run against the pin until you change it.</div>`);
+  parts.push(`<button class="goal-option${data.is_auto ? ' is-active' : ''}" data-goal="" role="button" tabIndex="0">` +
+    `<span>Auto (infer per search)</span>${data.is_auto ? '<span class="goal-set">current</span>' : ''}</button>`);
+  for (const g of data.goals || []) {
+    const isActive = data.active === g.key;
+    parts.push(`<button class="goal-option${isActive ? ' is-active' : ''}" data-goal="${esc(g.key)}" role="button" tabIndex="0">` +
+      `<span>${esc(g.label)}</span>${isActive ? '<span class="goal-set">current</span>' : ''}</button>`);
+  }
+  if (data.active && data.is_auto === false && !((data.goals || []).some(g => g.key === data.active))) {
+    parts.push(`<div class="goal-note">Pinned custom goal: <b>${esc(data.label)}</b></div>`);
+  }
+  parts.push(`<div class="goal-custom-row">` +
+    `<input id="goalCustomInput" type="text" placeholder="Something else… e.g. laptops" aria-label="Custom goal">` +
+    `<button id="goalCustomSet">Pin</button></div>`);
+  goalBody.innerHTML = parts.join('');
+
+  goalBody.querySelectorAll('.goal-option').forEach(btn => {
+    btn.addEventListener('click', () => setGoal(btn.dataset.goal));
+  });
+  const input = document.getElementById('goalCustomInput');
+  const setBtn = document.getElementById('goalCustomSet');
+  const commit = () => { const v = (input.value || '').trim(); if (v) setGoal(v); };
+  setBtn.addEventListener('click', commit);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') commit(); });
+}
+
+async function setGoal(goal) {
+  goalBody.innerHTML = 'Saving…';
+  try {
+    const res = await fetch('/api/goals', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ goal }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      goalBody.innerHTML = `<div class="goal-note">${esc(data.detail || 'Could not set goal')}</div>`;
+      return;
+    }
+    applyGoalState({ active: data.data?.goal || '', label: data.data?.goal_label || '', is_auto: !data.data?.goal });
+  } catch (e) {
+    goalBody.innerHTML = '<div class="goal-note">Could not set goal.</div>';
+    return;
+  }
+  await renderGoalPanel();
+}
+
+goalChip.addEventListener('click', async () => {
+  const opening = !goalPanel.classList.contains('open');
+  vtSwap(opening ? goalPanel : null, [goalPanel]);
+  goalChip.setAttribute('aria-expanded', opening ? 'true' : 'false');
+  if (opening) await renderGoalPanel();
+});
+document.getElementById('closeGoal').addEventListener('click', () => {
+  goalPanel.classList.remove('open');
+  goalChip.setAttribute('aria-expanded', 'false');
+});
+refreshGoalChip();
+
 // ── Time-of-day ambience ─────────────────────────────────────────
 // The outer chrome, window skies and room lighting follow the real
 // clock: morning warm, afternoon black & minimal, evening dusk,
@@ -1486,6 +1607,7 @@ initQueue({ send: sendFrame, onWork: setWorkActive });
 initAttachments({ setActivity });
 initDictation({ input: userInput, setActivity });
 initMusicCorner({ vtSwap });
+initVault();
 handleAgentEvent = wrapAgentEvent(handleAgentEvent, STATUS_TEXT);
 
 connect();
@@ -1564,7 +1686,15 @@ fetch('/api/campaign').then(r => r.json()).then(c => {
     // clientWidth minus 10px padding each side minus the TWO 10px gaps the
     // grip track sits between (floor|gap|0px-grip|gap|cmd).
     const rowWidth = appEl.clientWidth - 20 - 20;
-    const perFr = rowWidth / (startFr + 1);
+    // Floor pixels are f/(f+1) of the row — NONLINEAR in the ratio f. The
+    // first attempt stepped f by dx/pxPerFr (linear) and the grip lagged
+    // the cursor badly (260px of mouse moved it 75px at 1400px, observed
+    // live). Invert the relationship exactly so the grip tracks the mouse
+    // 1:1: from targetFloorPx, f = target / (rowWidth - target). The
+    // minmax() minimums (floor 280, chat 340) still clamp the render; the
+    // grip then stops at the clamp while the cursor keeps moving, which
+    // is the correct feel.
+    const startFloorPx = startFr / (startFr + 1) * rowWidth;
     let moved = false;
 
     document.body.classList.add('is-resizing');
@@ -1580,7 +1710,11 @@ fetch('/api/campaign').then(r => r.json()).then(c => {
     const onMove = (ev) => {
       const dx = ev.clientX - startX;
       if (Math.abs(dx) > MIN_PX) moved = true;
-      setFloorFr(startFr + dx / perFr);
+      const targetFloorPx = Math.min(
+        rowWidth - 340,                       // chat panel minimum
+        Math.max(280, startFloorPx + dx)      // floor minimum
+      );
+      setFloorFr(targetFloorPx / (rowWidth - targetFloorPx));
     };
     const onUp = () => {
       document.body.classList.remove('is-resizing');
@@ -1602,7 +1736,8 @@ fetch('/api/campaign').then(r => r.json()).then(c => {
     const rowWidth = appEl.clientWidth - 20 - 20;
     const perFr = rowWidth / (floorFrNow() + 1);
     const stepFr = 24 / perFr;
-    localStorage.setItem(KEY, String(setFloorFr(floorFrNow() + dir * stepFr)));
+    setFloorFr(floorFrNow() + dir * stepFr);
+    localStorage.setItem(KEY, String(floorFrNow()));
   }
 
   grip.addEventListener('pointerdown', beginDrag);

@@ -31,6 +31,7 @@ class ActionType(Enum):
     ASK_AGENT = "ask_agent"
     TEAM_ACT = "team_act"
     CAMPAIGN = "campaign"
+    GOAL = "goal"
 
 
 @dataclass
@@ -108,6 +109,20 @@ _TOOLS = [
                         },
                     },
                     "required": ["location"],
+                },
+            },
+            {
+                "name": "set_selling_goal",
+                "description": "Pin or clear what the user is SELLING (the outreach goal). Use when the user states it directly: 'i sell autocad keys', 'we are selling websites now', 'my goal is X', 'clear the goal'. Pass goal='' to clear back to auto.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "goal": {
+                            "type": "string",
+                            "description": "What they are selling, in a few words - e.g. 'AutoCAD keys', 'web design services', 'laptops'. Empty string clears the goal (system infers per search again).",
+                        },
+                    },
+                    "required": ["goal"],
                 },
             },
             {
@@ -310,6 +325,13 @@ def parse_intents(user_input: str, context: list[dict] = None,
         seen_types.add(action.type)
         actions.append(action)
 
+    # Quick GOAL check (no API call) — "i sell autocad keys" / "goal is
+    # websites" pins or clears what JARVIS is selling. BEFORE the brainstorm
+    # triggers, which also listen for product-y phrases ("my product").
+    goal_action = _match_goal_statement(text, lower)
+    if goal_action:
+        return [goal_action]
+
     # Quick brainstorm check (no API call)
     BRAINSTORM_TRIGGERS = (
         "brainstorm", "set up my profile", "configure my business",
@@ -443,6 +465,19 @@ def _parse_with_gemini(user_input: str, context: list[dict] = None,
             for call in turn.calls:
                 emit(_handle_function_call(call.name, call.args, user_input))
 
+            # Deterministic backstop: an AI-emitted GOAL is honored only when
+            # the message itself has a selling-statement shape ('i sell X',
+            # 'my goal is X', 'clear the goal' ...). Gemini misreads searches
+            # that merely CONTAIN the word 'goal' ('goal keeper gloves
+            # supplier') as goal switches; the pin outranks the model, so a
+            # shapeless goal call is dropped and the search stands alone.
+            if (any(a.type == ActionType.GOAL and
+                    a.params.get("source") == "ai" for a in collect)
+                    and not _has_goal_statement_shape(user_input)):
+                collect[:] = [a for a in collect
+                              if not (a.type == ActionType.GOAL
+                                      and a.params.get("source") == "ai")]
+
             # Chain supplement: if the user asked for a step that Gemini
             # didn't emit, append its logical follow-up. Only steps the
             # user explicitly named are supplemented -- and only safe
@@ -460,7 +495,11 @@ def _parse_with_gemini(user_input: str, context: list[dict] = None,
                         break
                     emit(nxt_action)
                     current = nxt
-            return collect
+            # A backstop-dropped goal call can leave the turn empty (Gemini
+            # emitted ONLY the misread goal); fall through to the text reply
+            # instead of returning [] — a silent dead end otherwise.
+            if collect:
+                return collect
 
         # Text response (clarification or chat)
         if turn.text:
@@ -560,9 +599,15 @@ def _build_system_prompt(business_profile: dict = None,
         "synonym-expand, or drop the exclusion half ('no X', 'remove X', 'dont want X') "
         "-- the pipeline parses exclusions out of their exact words and dropping them "
         "resurrects the kinds of business the user just banned.",
-        "- The user's goal changes between searches: websites today, AutoCAD licences tomorrow. "
-        "Pass what they are selling now as `goal`. If they never say, leave it out and the "
-        "system falls back to their saved product.",
+        "- The user's selling goal is pinned state, not a guess: they set it with "
+        "'i sell X' / 'goal is X' (use set_selling_goal), it shows in the goal "
+        "chip, and searches run against it. NEVER call set_selling_goal for a "
+        "SEARCH message, even one containing the word 'goal' ('goal keeper "
+        "gloves supplier' is a product to FIND, not to sell) — only a direct "
+        "first-person selling statement sets it. Pass `goal` on "
+        "search_businesses only from set_selling_goal's argument - NEVER guess "
+        "it from search wording like 'web design clients in pune' (that is "
+        "WHO they target, not what they sell).",
         "- If the user says 'draft' or 'write emails', use draft_emails.",
         "- If the user says 'send', use send_emails.",
         "- If the user says 'status' or 'dashboard', use the appropriate tool.",
@@ -623,6 +668,9 @@ def _handle_function_call(name: str, args: dict, user_input: str) -> Action:
     if name == "ask_user":
         return _ask_user_action(args)
 
+    if name == "set_selling_goal":
+        return _goal_action(args.get("goal", ""), source="ai")
+
     # The action registry is the single source of truth for the mapping
     # (gemini function name -> ActionType -> ack). SEARCH's ack is built
     # dynamically from its args.
@@ -641,6 +689,88 @@ def _handle_function_call(name: str, args: dict, user_input: str) -> Action:
                                "and your approval checklist...")
 
     return Action(type=ActionType.UNKNOWN, response=f"Unknown action: {name}")
+
+
+_GOAL_CLEAR_RE = re.compile(
+    r"^\s*(?:(?:clear|reset|remove|forget)\s+(?:the\s+)?(?:selling\s+)?goal"
+    r"(?:\s+back\s+to\s+auto)?|(?:selling\s+)?goal\s+back\s+to\s+auto)\s*$",
+    re.IGNORECASE)
+_GOAL_SET_RE = re.compile(
+    r"^\s*(?:my\s+goal\s+is|the\s+goal\s+is|our\s+goal\s+is|goal[:=])\s*(.+?)\s*$",
+    re.IGNORECASE)
+_GOAL_SELL_RE = re.compile(
+    r"^\s*(?:(?:i|we)\s+(?:(?:now\s+)?(?:sell|selling)|"
+    r"(?:am|are)\s+selling)|(?:i|we)'(?:m|re)\s+selling)\s+(.+?)\s*$",
+    re.IGNORECASE)
+_GOAL_PREFIX_RE = re.compile(
+    r"^\s*(?:set\s+)?(?:selling\s+)?goal(?:\s+(?:is|to)\s+|:\s*)(.+?)\s*$",
+    re.IGNORECASE)
+
+
+_GOAL_STATEMENT_SHAPE_RE = re.compile(
+    r"\b(?:i|we)\s+(?:(?:now\s+)?(?:sell|selling)|(?:am|are)\s+selling)"
+    r"|\b(?:i|we)'(?:m|re)\s+selling"
+    r"|\b(?:my|our|the)\s+goal\s+is\b"
+    r"|\b(?:set\s+)?(?:selling\s+)?goal\s*[:=]"
+    r"|\bset\s+(?:selling\s+)?goal\b"
+    r"|\b(?:clear|reset|remove|forget)\s+(?:the\s+)?(?:selling\s+)?goal\b"
+    r"|\bgoal\s+back\s+to\s+auto\b",
+    re.IGNORECASE)
+
+
+def _has_goal_statement_shape(text: str) -> bool:
+    """Does this message CONTAIN a selling-goal statement anywhere?
+
+    Looser than the fastpath's full-message match: 'i'm selling laptops now,
+    find clients in pune' reaches Gemini (the anchored regexes pass on it),
+    and its set_selling_goal call must survive. What this gates out is a goal
+    call on a message with no statement shape at all ('goal keeper gloves
+    supplier').
+    """
+    return _GOAL_STATEMENT_SHAPE_RE.search(text or "") is not None
+
+
+def _match_goal_statement(text: str, lower: str) -> Action | None:
+    """Catch direct goal statements locally - no API call, no guess.
+
+    Handles: 'i sell X', 'we are selling X now', 'my goal is X',
+    'goal: X', 'set goal X', and 'clear the goal'. Only fires on statements
+    ABOUT the goal, never on searches.
+    """
+    if "goal" not in lower and not re.search(
+            r"\b(?:i|we)\s+(?:(?:now\s+)?(?:sell|selling)|"
+            r"(?:am|are)\s+selling)|\b(?:i|we)'(?:m|re)\s+selling", lower):
+        return None
+
+    m = _GOAL_CLEAR_RE.match(text.strip())
+    if m:
+        return _goal_action("", source="user")
+
+    body = None
+    for rx in (_GOAL_SET_RE, _GOAL_SELL_RE, _GOAL_PREFIX_RE):
+        m = rx.match(text.strip())
+        if m:
+            body = (m.group(1) or "").strip()
+            break
+    if body is None:
+        return None
+    # A bare 'goal' with no product body is a question, not a statement.
+    if not body or body.lower() in ("what", "what?", "?"):
+        return None
+    # Discourse tail on sell statements: "i'm selling laptops now" pins
+    # 'laptops', not 'laptops now'.
+    body = re.sub(r"\s+(?:now|instead|too|also|these\s+days)\s*$", "",
+                  body, flags=re.IGNORECASE).strip()
+    return _goal_action(body, source="user")
+
+
+def _goal_action(goal_text: str, source: str = "user") -> Action:
+    """Build the GOAL action - set, switch, or clear what we are selling."""
+    return Action(
+        type=ActionType.GOAL,
+        params={"goal": (goal_text or "").strip(), "source": source},
+        response="Updating what we're selling...",
+    )
 
 
 def _build_search_response(args: dict) -> str:
@@ -697,6 +827,10 @@ I can help you with business outreach. Here's what I understand:
     "Send all emails"
     "Ship it"
     "Go ahead and send"
+
+  SELLING GOAL
+    "I sell autocad keys" / "we are selling websites now"
+    "My goal is X" / "Set goal X" / "Clear the goal"
 
   RESEARCH
     "Research these businesses"

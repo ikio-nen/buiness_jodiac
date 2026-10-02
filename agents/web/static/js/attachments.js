@@ -7,7 +7,7 @@
    by the sender (takeAttachment) rather than read and left set, so one file
    never silently rides two messages. */
 
-import { esc } from './util.js?v=28';   // same version as app.js's imports
+import { esc } from './util.js?v=43';   // same version as app.js's imports
 
 let pending = null;   // {path, name}
 
