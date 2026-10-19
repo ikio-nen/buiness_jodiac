@@ -1,0 +1,75 @@
+From 8288615dfe82777d1ab9f072bda95a3520853116 Mon Sep 17 00:00:00 2001
+From: Kaze <kaze@local>
+Date: Fri, 2 Oct 2026 10:31:02 +0000
+Subject: [PATCH] Portable data roots: JODIAC_HOME / JODIAC_OBSIDIAN env
+ overrides
+
+- OUTPUT_DIR follows JODIAC_HOME (default F:/jodiac, unchanged)
+- OBSIDIAN_VAULT follows JODIAC_OBSIDIAN (default D:/brain, unchanged)
+- import-time mkdir now raises a helpful OSError naming JODIAC_HOME
+  when the drive is missing instead of a bare traceback
+---
+ AGENTS.md        |  1 +
+ agents/config.py | 18 +++++++++++++++---
+ 2 files changed, 16 insertions(+), 3 deletions(-)
+
+diff --git a/AGENTS.md b/AGENTS.md
+index 99e67d7..9a56f06 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -3,6 +3,7 @@
+ ## Environment
+ 
+ - Python is at `E:\python.exe`, NOT system python. Always use `"E:\python.exe"` in commands.
++- Portable data roots (added 2026-10-02): `JODIAC_HOME` env replaces the `F:/jodiac` drive letter (`OUTPUT_DIR = JODIAC_HOME/agent_output`); `JODIAC_OBSIDIAN` replaces `D:/brain`. Unset = old paths, so the F:/D:/ laptop is unaffected. The import-time mkdir loop raises a helpful OSError naming JODIAC_HOME when the drive is missing instead of a bare traceback.
+ - Windows default encoding is cp932 — use `encoding="utf-8"` in all `read_text()`/`write_text()` calls or em dashes and special chars crash.
+ - `json.dumps()` on Windows: add `ensure_ascii=True` to avoid cp932 encoding errors when writing to files.
+ - Node.js v24.20.0 + npm 10.2.5 available. OmniRoute (AI gateway) installed globally but has dependency issues — needs `tsx` and `ws` packages.
+diff --git a/agents/config.py b/agents/config.py
+index d242ddc..1ff588f 100644
+--- a/agents/config.py
++++ b/agents/config.py
+@@ -1,17 +1,22 @@
+ """Configuration for the multi-agent system."""
+ import json
++import os
+ from pathlib import Path
+ 
+ # ── Paths ──────────────────────────────────────────────────────────────
++# Portable roots: JODIAC_HOME replaces the F:/jodiac drive letter and
++# JODIAC_OBSIDIAN replaces D:/brain, so the project runs on machines without
++# those drives. Unset = previous behavior (the F:/D:/ laptop is unaffected).
++_JODIAC_HOME = Path(os.environ.get("JODIAC_HOME", "F:/jodiac"))
+ PROJECT_ROOT = Path(__file__).parent.parent
+-OUTPUT_DIR = Path("F:/jodiac/agent_output")
++OUTPUT_DIR = _JODIAC_HOME / "agent_output"
+ SITES_DIR = OUTPUT_DIR / "sites"
+ REPORTS_DIR = OUTPUT_DIR / "reports"
+ EMAILS_DIR = OUTPUT_DIR / "emails"
+ DATA_DIR = OUTPUT_DIR / "data"
+ SESSIONS_DIR = OUTPUT_DIR / "sessions"
+ PDF_DIR = OUTPUT_DIR / "pdfs"
+-OBSIDIAN_VAULT = Path("D:/brain/brain")
++OBSIDIAN_VAULT = Path(os.environ.get("JODIAC_OBSIDIAN", "D:/brain/brain"))
+ OBSIDIAN_PROJECTS = OBSIDIAN_VAULT / "projects"
+ OBSIDIAN_CONTACTS = OBSIDIAN_VAULT / "contacts"
+ OBSIDIAN_REPORTS = OBSIDIAN_VAULT / "reports"
+@@ -28,7 +33,14 @@ for d in [OUTPUT_DIR, SITES_DIR, REPORTS_DIR, EMAILS_DIR, DATA_DIR,
+           SESSIONS_DIR, PDF_DIR, KB_DIR, OBSIDIAN_PROJECTS, OBSIDIAN_CONTACTS,
+           OBSIDIAN_REPORTS, OBSIDIAN_INDUSTRIES, OBSIDIAN_RESEARCH,
+           OBSIDIAN_COMPETITORS, OBSIDIAN_FOLLOWUPS, OBSIDIAN_INSIGHTS]:
+-    d.mkdir(parents=True, exist_ok=True)
++    try:
++        d.mkdir(parents=True, exist_ok=True)
++    except OSError as e:
++        raise OSError(
++            f"Cannot create JODIAC data dir '{d}' ({e}). "
++            "Set JODIAC_HOME to a writable folder, e.g. "
++            "JODIAC_HOME=D:\\jodiac (Windows) or JODIAC_HOME=~/jodiac."
++        ) from e
+ 
+ # ── Config file ────────────────────────────────────────────────────────
+ CONFIG_FILE = OUTPUT_DIR / "config.json"
+-- 
+2.43.0
+

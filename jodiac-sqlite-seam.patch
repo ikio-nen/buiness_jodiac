@@ -1,0 +1,695 @@
+From bfb289f954478ddf325ce3f986f776e85d465d09 Mon Sep 17 00:00:00 2001
+From: Kaze <kaze@local>
+Date: Fri, 2 Oct 2026 10:33:21 +0000
+Subject: [PATCH] SQLite seam: db.py + store.py + usage dual-write
+
+- agents/db.py: one file (OUTPUT_DIR/jodiac.db), WAL, FK enforcement,
+  versioned idempotent migrations, per-call connections
+- agents/store.py: typed CRUD for businesses, emails, sessions, usage;
+  safe defaults on failure, never raises
+- usage_log.record dual-writes to DB with serving provider (cascade
+  grading feed); JSONL stays source of truth
+- agents/test_db.py: 7 checks, real SQL, stubbed config
+---
+ AGENTS.md              |   8 ++
+ agents/ai/usage_log.py |  26 +++++
+ agents/db.py           | 156 +++++++++++++++++++++++++
+ agents/store.py        | 257 +++++++++++++++++++++++++++++++++++++++++
+ agents/test_db.py      | 175 ++++++++++++++++++++++++++++
+ 5 files changed, 622 insertions(+)
+ create mode 100644 agents/db.py
+ create mode 100644 agents/store.py
+ create mode 100644 agents/test_db.py
+
+diff --git a/AGENTS.md b/AGENTS.md
+index 9a56f06..011a73c 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -23,6 +23,14 @@
+ - No-cost reality (checked 2026-09-21): Vercel gateway key validates but completions are BLOCKED until a card is added on vercel.com (their `customer_verification_required`). OpenCode Zen's free tier only serves from inside the OpenCode client (`FreeTierError`); glm/gpt/claude need the user's OpenCode API key in `AI_PROVIDER_KEY` env or `config.ai_provider_key`. Only truly-$0: `inclusionai/ling-3.0-flash-*-free`, `poolside/laguna-s-2.1-free` on Vercel; `deepseek-v4-flash-free`, `nemotron-*-free`, `ling-*-free`, `mimo-v2.5-free` on Zen (still key-gated).
+ - Free-provider cascade (added 2026-10-02, `agents/ai/providers.py`): `PROVIDER_PRESETS` names every free OpenAI-compat provider — `zai` (glm-4.7-flash permanently $0), `groq` (llama-3.3-70b-versatile), `deepseek`, `openrouter` (…`:free`), `huggingface`, `nvidia`, `mistral`, `pollinations` (KEYLESS, weak tools), plus legacy `ollama`/`opencode_zen`/`vercel_gateway`. `set_ai_provider_fallbacks([...])` sets the chain; one call runs on ONE provider — first of `[primary, *fallbacks]` that completes it. Skip-across-providers on 429/5xx/transport/401/403/404 (free-tier model IDs rotate; a dead key must not kill the pipeline); other 4xx raise immediately (request-shape bug). When all are skipped the error propagates and `ai_engine` falls back to Gemini (existing rule). Preset `model` is the free default when `ai_provider_model` is unset (fallbacks always use their preset); `ai_provider_base_url` overrides the PRIMARY only. Per-provider keys: `AI_PROVIDER_KEY_<NAME>` env (e.g. `AI_PROVIDER_KEY_GROQ`) > `AI_PROVIDER_KEY` env > manual config — no setter by design, never in git. `providers.status()` now also reports `chain`. Self-check: `agents/test_provider_cascade.py` (12 checks, stubbed transport, no keys/network).
+ - opencode_zen is DEAD (2026-09-17: 403 outside the OpenCode client) — kept in presets only so old configs don't crash; never select it. GitHub Models retired 2026-07-30; Chutes/Novita/SambaNova free tiers ended 2026 — do not add them as presets.
++
++## Database (SQLite seam)
++
++- `agents/db.py` owns the one SQLite file (`OUTPUT_DIR/jodiac.db`, so `JODIAC_HOME` moves it too) — stdlib `sqlite3`, zero new deps. WAL mode + `PRAGMA foreign_keys=ON`, one short-lived connection per call (no shared-connection threading hazards), same pattern as `chat_memory.py`. Migrations are idempotent and versioned in `schema_migrations`.
++- `agents/store.py` is the only data-access layer: plain dicts in/out, `upsert_business` (dedup on session_id+ext_id), `list_businesses` (verdict filter), `save_email`/`mark_email_sent`/`list_emails`, `register_session`/`get_session`, `log_usage`, `usage_stats`, `provider_stats`. Every function degrades to safe defaults on DB failure — telemetry can never break the pipeline (same rule as the event bus).
++- v1 tables: `businesses`, `emails` (drafts + sent, FK to businesses), `sessions` (registry), `usage` (per AI call incl. serving `provider` — the grading feed for the provider cascade). Session JSON files are NOT migrated yet — the DB is additive in v1; cutover is a future step.
++- `usage_log.record` dual-writes: JSONL stays the source of truth, the DB mirror adds the serving provider (`gemini` when used_gemini else the active cascade provider). `provider_stats()` gives per-provider calls + ok-rate — this is what grades the free-provider cascade over time.
++- Self-check: `agents/test_db.py` (7 checks, real SQL against a tmp DB, stubbed config).
+ - Tool loop: Gemini `types.Tool`/`types.Content` translate to OpenAI tools/messages in providers.py (`_tools_to_openai`, `_contents_to_messages`) — `_tools_to_openai` must accept BOTH shapes: SDK `types.Tool` AND chatbot's plain `{"function_declarations": [...]}` dicts (a dict-only caller once left the provider path with zero tools → every intent parsed UNKNOWN). SDK `types.Schema` has NO `to_json_schema()` — serialize with `model_dump(exclude_none=True, mode="json")` and lowercase the type enums for the OpenAI dialect.
+ - Provider benchmark (2026-09-21, real parser + real campaign businesses): gemini-3.5-flash-lite 8/8 intents correct at 1.4–5s and rich grounded rationales; qwen2.5:3b via ollama 1/8 (6–9s, wrong tools, misses params, one 99s outlier). Local-only mode is NOT good enough for daily campaigns on a 3B model; a ≥8B tool-tuned local model might close the gap but is untested. Benchmark harness gotcha: `set_ai_model()` is shared with Gemini's `ai_model` — when benchmarking a non-Gemini provider, restore the saved model before the Gemini leg or the Gemini leg 404s and silently heuristic-falls-back.
+ - Provider keys live in env (`AI_PROVIDER_KEY`) or manual config edit — no setter by design so code paths can't persist them; keys must never enter git-tracked files.
+diff --git a/agents/ai/usage_log.py b/agents/ai/usage_log.py
+index 752c84e..ef2ad56 100644
+--- a/agents/ai/usage_log.py
++++ b/agents/ai/usage_log.py
+@@ -16,6 +16,21 @@ _LOG_DIR = Path("agent_output/usage")
+ _LOG_FILE = _LOG_DIR / "usage.jsonl"
+ 
+ 
++def _serving_provider(used_gemini: bool) -> str:
++    """Which model path served this call — the cascade grading feed.
++
++    Best-effort: any failure yields "" and the JSONL record is unaffected."""
++    if used_gemini:
++        return "gemini"
++    try:
++        from agents.ai import providers
++        if providers.provider_active():
++            return str(providers.status().get("provider", ""))
++    except Exception:
++        pass
++    return ""
++
++
+ def record(capability: str, prompt_version: str, business_id: str = "",
+            ok: bool = True, used_gemini: bool = False, notes: str = "") -> None:
+     """Append one UsageRecord. Never raises — logging can't break the seam."""
+@@ -32,6 +47,17 @@ def record(capability: str, prompt_version: str, business_id: str = "",
+         _LOG_DIR.mkdir(parents=True, exist_ok=True)
+         with _LOG_FILE.open("a", encoding="utf-8") as f:
+             f.write(json.dumps(rec.model_dump(), ensure_ascii=True) + "\n")
++        try:
++            # DB mirror: per-provider grading feed for the cascade.
++            # Best-effort — the JSONL above stays the source of truth.
++            from agents import store as _store
++            _store.log_usage(
++                ts=rec.ts, capability=capability,
++                prompt_version=prompt_version, business_id=business_id,
++                ok=ok, used_gemini=used_gemini,
++                provider=_serving_provider(used_gemini), notes=notes[:160])
++        except Exception:
++            pass
+         try:
+             from agents.event_bus import emit
+             emit("brain", action="ai",
+diff --git a/agents/db.py b/agents/db.py
+new file mode 100644
+index 0000000..247a5f7
+--- /dev/null
++++ b/agents/db.py
+@@ -0,0 +1,156 @@
++"""SQLite database seam — one file, zero new dependencies (stdlib sqlite3).
++
++``jodiac.db`` lives under ``OUTPUT_DIR`` (so ``JODIAC_HOME`` moves it too).
++WAL mode for concurrent CLI + WebSocket access — the same pattern as
++``chat_memory.py``. Every public function opens its own short-lived
++connection: no shared-connection threading hazards, no connection healing.
++
++Tables (v1): ``businesses`` (discovered + scored businesses per session),
++``emails`` (drafts + sent outreach), ``sessions`` (registry), ``usage``
++(per AI call, including which provider served it — the grading feed for the
++provider cascade).
++
++Migrations are idempotent and versioned in ``schema_migrations``. The DB is
++best-effort infrastructure: every writer wraps it so a DB failure degrades,
++never blocks the pipeline.
++"""
++from __future__ import annotations
++
++import sqlite3
++from contextlib import contextmanager
++from datetime import datetime
++from pathlib import Path
++
++from agents.config import OUTPUT_DIR
++
++DB_PATH = OUTPUT_DIR / "jodiac.db"
++
++
++def _now() -> str:
++    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
++
++
++@contextmanager
++def connect():
++    """One short-lived connection: WAL, row dicts, FK enforcement."""
++    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
++    conn = sqlite3.connect(str(DB_PATH))
++    try:
++        conn.row_factory = sqlite3.Row
++        conn.execute("PRAGMA journal_mode=WAL")
++        conn.execute("PRAGMA foreign_keys=ON")
++        yield conn
++        conn.commit()
++    finally:
++        conn.close()
++
++
++# ── Migrations ───────────────────────────────────────────────────────
++# Each entry: (version, sql). Applied in order, once each.
++
++_MIGRATIONS: list[tuple[int, str]] = [
++    (1, """
++    CREATE TABLE IF NOT EXISTS schema_migrations (
++        version INTEGER PRIMARY KEY,
++        applied_at TEXT NOT NULL
++    );
++    CREATE TABLE IF NOT EXISTS businesses (
++        id INTEGER PRIMARY KEY AUTOINCREMENT,
++        session_id TEXT NOT NULL DEFAULT '',
++        ext_id TEXT NOT NULL DEFAULT '',
++        name TEXT NOT NULL DEFAULT '',
++        category TEXT DEFAULT '',
++        location TEXT DEFAULT '',
++        website TEXT DEFAULT '',
++        phone TEXT DEFAULT '',
++        email TEXT DEFAULT '',
++        rating REAL,
++        review_count INTEGER,
++        lat REAL,
++        lon REAL,
++        source TEXT DEFAULT '',
++        snippets_json TEXT DEFAULT '[]',
++        fit_score INTEGER,
++        fit_verdict TEXT DEFAULT '',
++        fit_rationale TEXT DEFAULT '',
++        icp_veto TEXT DEFAULT '',
++        created_at TEXT NOT NULL,
++        updated_at TEXT NOT NULL,
++        UNIQUE(session_id, ext_id)
++    );
++    CREATE INDEX IF NOT EXISTS idx_businesses_session ON businesses(session_id);
++    CREATE TABLE IF NOT EXISTS emails (
++        id INTEGER PRIMARY KEY AUTOINCREMENT,
++        session_id TEXT NOT NULL DEFAULT '',
++        business_id INTEGER REFERENCES businesses(id),
++        kind TEXT NOT NULL DEFAULT 'draft',
++        to_email TEXT DEFAULT '',
++        subject TEXT DEFAULT '',
++        body TEXT DEFAULT '',
++        status TEXT NOT NULL DEFAULT 'draft',
++        provider TEXT DEFAULT '',
++        sent_at TEXT DEFAULT '',
++        created_at TEXT NOT NULL
++    );
++    CREATE INDEX IF NOT EXISTS idx_emails_session ON emails(session_id);
++    CREATE TABLE IF NOT EXISTS sessions (
++        id TEXT PRIMARY KEY,
++        name TEXT DEFAULT '',
++        product TEXT DEFAULT '',
++        created_at TEXT NOT NULL
++    );
++    CREATE TABLE IF NOT EXISTS usage (
++        id INTEGER PRIMARY KEY AUTOINCREMENT,
++        ts TEXT NOT NULL,
++        capability TEXT NOT NULL,
++        prompt_version TEXT DEFAULT '',
++        business_id TEXT DEFAULT '',
++        ok INTEGER NOT NULL DEFAULT 1,
++        used_gemini INTEGER NOT NULL DEFAULT 0,
++        provider TEXT DEFAULT '',
++        notes TEXT DEFAULT ''
++    );
++    CREATE INDEX IF NOT EXISTS idx_usage_cap ON usage(capability);
++    CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage(provider);
++    """),
++]
++
++
++def migrate() -> int:
++    """Apply pending migrations. Returns the current schema version."""
++    with connect() as conn:
++        conn.execute(
++            "CREATE TABLE IF NOT EXISTS schema_migrations ("
++            "version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
++        applied = {r[0] for r in
++                   conn.execute("SELECT version FROM schema_migrations")}
++        for version, sql in sorted(_MIGRATIONS):
++            if version in applied:
++                continue
++            conn.executescript(sql)
++            conn.execute(
++                "INSERT OR IGNORE INTO schema_migrations (version, applied_at)"
++                " VALUES (?, ?)", (version, _now()))
++    return current_version()
++
++
++def current_version() -> int:
++    with connect() as conn:
++        row = conn.execute(
++            "SELECT MAX(version) FROM schema_migrations").fetchone()
++        return row[0] or 0
++
++
++def journal_mode() -> str:
++    with connect() as conn:
++        return conn.execute("PRAGMA journal_mode").fetchone()[0]
++
++
++def status() -> dict:
++    """{path, version, journal_mode, tables} for dashboards/debugging."""
++    with connect() as conn:
++        tables = [r[0] for r in conn.execute(
++            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")]
++    return {"path": str(DB_PATH), "version": current_version(),
++            "journal_mode": journal_mode(),
++            "tables": [t for t in tables if t != "sqlite_sequence"]}
+diff --git a/agents/store.py b/agents/store.py
+new file mode 100644
+index 0000000..232046f
+--- /dev/null
++++ b/agents/store.py
+@@ -0,0 +1,257 @@
++"""Typed data access over agents/db.py — the one place business, outreach,
++session-registry, and usage rows are read and written.
++
++All functions take and return plain dicts (the codebase's lingua franca),
++open their own short-lived connection via db.connect(), and never raise for
++telemetry-grade writes: a DB failure degrades, never blocks the pipeline.
++"""
++from __future__ import annotations
++
++import json
++
++from agents import db as _db
++
++
++def _row_to_dict(row) -> dict:
++    return dict(row) if row is not None else {}
++
++
++# ── Businesses ───────────────────────────────────────────────────────
++
++_BUSINESS_FIELDS = (
++    "session_id", "ext_id", "name", "category", "location", "website",
++    "phone", "email", "rating", "review_count", "lat", "lon", "source",
++    "snippets_json", "fit_score", "fit_verdict", "fit_rationale", "icp_veto",
++)
++
++
++def _business_params(session_id: str, data: dict) -> dict:
++    snippets = data.get("snippets") or []
++    params = {
++        "session_id": session_id,
++        "ext_id": str(data.get("id") or data.get("name") or ""),
++        "name": str(data.get("name", "")),
++        "category": str(data.get("category", "")),
++        "location": str(data.get("location", "")),
++        "website": str(data.get("website", "")),
++        "phone": str(data.get("phone", "")),
++        "email": str(data.get("email", "")),
++        "rating": data.get("rating"),
++        "review_count": data.get("review_count"),
++        "lat": data.get("lat"),
++        "lon": data.get("lon"),
++        "source": str(data.get("source", "")),
++        "snippets_json": json.dumps(snippets, ensure_ascii=True),
++        "fit_score": (data.get("fit") or {}).get("score")
++        if isinstance(data.get("fit"), dict) else data.get("fit_score"),
++        "fit_verdict": (data.get("fit") or {}).get("fit", "")
++        if isinstance(data.get("fit"), dict) else str(data.get("fit_verdict", "")),
++        "fit_rationale": (data.get("fit") or {}).get("rationale", "")
++        if isinstance(data.get("fit"), dict) else str(data.get("fit_rationale", "")),
++        "icp_veto": str(data.get("icp_veto", "")),
++    }
++    return params
++
++
++def upsert_business(session_id: str, data: dict) -> int:
++    """Insert or update a business (deduped on session_id + ext_id).
++
++    Returns the row id. Never raises."""
++    try:
++        _db.migrate()
++        p = _business_params(session_id, data)
++        cols = ", ".join(_BUSINESS_FIELDS)
++        placeholders = ", ".join(f":{c}" for c in _BUSINESS_FIELDS)
++        updates = ", ".join(f"{c} = excluded.{c}" for c in _BUSINESS_FIELDS
++                            if c not in ("session_id", "ext_id"))
++        with _db.connect() as conn:
++            conn.execute(
++                f"INSERT INTO businesses ({cols}, created_at, updated_at)"
++                f" VALUES ({placeholders}, :now, :now)"
++                f" ON CONFLICT(session_id, ext_id) DO UPDATE SET {updates},"
++                f" updated_at = excluded.updated_at",
++                {**p, "now": _db._now()},
++            )
++            row = conn.execute(
++                "SELECT id FROM businesses WHERE session_id = ? AND ext_id = ?",
++                (session_id, p["ext_id"])).fetchone()
++            return row["id"] if row else 0
++    except Exception:
++        return 0
++
++
++def list_businesses(session_id: str, verdict: str = "") -> list[dict]:
++    """Businesses for a session, optionally filtered by fit verdict."""
++    try:
++        _db.migrate()
++        with _db.connect() as conn:
++            if verdict:
++                rows = conn.execute(
++                    "SELECT * FROM businesses WHERE session_id = ?"
++                    " AND fit_verdict = ? ORDER BY fit_score DESC NULLS LAST, name",
++                    (session_id, verdict)).fetchall()
++            else:
++                rows = conn.execute(
++                    "SELECT * FROM businesses WHERE session_id = ?"
++                    " ORDER BY fit_score DESC NULLS LAST, name",
++                    (session_id,)).fetchall()
++            return [_row_to_dict(r) for r in rows]
++    except Exception:
++        return []
++
++
++def count_businesses(session_id: str = "") -> int:
++    try:
++        _db.migrate()
++        with _db.connect() as conn:
++            if session_id:
++                row = conn.execute(
++                    "SELECT COUNT(*) FROM businesses WHERE session_id = ?",
++                    (session_id,)).fetchone()
++            else:
++                row = conn.execute("SELECT COUNT(*) FROM businesses").fetchone()
++            return row[0] or 0
++    except Exception:
++        return 0
++
++
++# ── Emails (drafts + sent outreach) ──────────────────────────────────
++
++def save_email(session_id: str, to_email: str, subject: str, body: str,
++               business_id: int = 0, kind: str = "draft",
++               status: str = "draft", provider: str = "") -> int:
++    """Persist an outreach email. Returns the row id, 0 on failure."""
++    try:
++        _db.migrate()
++        with _db.connect() as conn:
++            cur = conn.execute(
++                "INSERT INTO emails (session_id, business_id, kind, to_email,"
++                " subject, body, status, provider, created_at)"
++                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
++                (session_id, business_id or None, kind, to_email, subject,
++                 body, status, provider, _db._now()),
++            )
++            return cur.lastrowid or 0
++    except Exception:
++        return 0
++
++
++def mark_email_sent(email_id: int, provider: str = "") -> bool:
++    try:
++        _db.migrate()
++        with _db.connect() as conn:
++            cur = conn.execute(
++                "UPDATE emails SET kind = 'sent', status = 'sent',"
++                " provider = ?, sent_at = ? WHERE id = ?",
++                (provider, _db._now(), email_id),
++            )
++            return cur.rowcount > 0
++    except Exception:
++        return False
++
++
++def list_emails(session_id: str, kind: str = "") -> list[dict]:
++    try:
++        _db.migrate()
++        with _db.connect() as conn:
++            if kind:
++                rows = conn.execute(
++                    "SELECT * FROM emails WHERE session_id = ? AND kind = ?"
++                    " ORDER BY id", (session_id, kind)).fetchall()
++            else:
++                rows = conn.execute(
++                    "SELECT * FROM emails WHERE session_id = ? ORDER BY id",
++                    (session_id,)).fetchall()
++            return [_row_to_dict(r) for r in rows]
++    except Exception:
++        return []
++
++
++# ── Session registry ─────────────────────────────────────────────────
++
++def register_session(session_id: str, name: str = "",
++                     product: str = "") -> bool:
++    try:
++        _db.migrate()
++        with _db.connect() as conn:
++            conn.execute(
++                "INSERT INTO sessions (id, name, product, created_at)"
++                " VALUES (?, ?, ?, ?)"
++                " ON CONFLICT(id) DO UPDATE SET name = excluded.name,"
++                " product = excluded.product",
++                (session_id, name, product, _db._now()),
++            )
++            return True
++    except Exception:
++        return False
++
++
++def get_session(session_id: str) -> dict:
++    try:
++        _db.migrate()
++        with _db.connect() as conn:
++            row = conn.execute(
++                "SELECT * FROM sessions WHERE id = ?", (session_id,)).fetchone()
++            return _row_to_dict(row)
++    except Exception:
++        return {}
++
++
++# ── Usage (per AI call — the provider grading feed) ───────────────────
++
++def log_usage(ts: str, capability: str, prompt_version: str = "",
++              business_id: str = "", ok: bool = True,
++              used_gemini: bool = False, provider: str = "",
++              notes: str = "") -> bool:
++    """Append one usage record. Never raises."""
++    try:
++        _db.migrate()
++        with _db.connect() as conn:
++            conn.execute(
++                "INSERT INTO usage (ts, capability, prompt_version, business_id,"
++                " ok, used_gemini, provider, notes)"
++                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
++                (ts, capability, prompt_version, business_id, int(ok),
++                 int(used_gemini), provider, notes[:160]),
++            )
++            return True
++    except Exception:
++        return False
++
++
++def usage_stats() -> dict:
++    """Per-capability totals (mirrors usage_log.stats shape). Never raises."""
++    out: dict[str, dict] = {}
++    try:
++        _db.migrate()
++        with _db.connect() as conn:
++            for r in conn.execute(
++                    "SELECT capability, COUNT(*) c,"
++                    " SUM(used_gemini) g, SUM(1 - ok) f"
++                    " FROM usage GROUP BY capability"):
++                out[r["capability"]] = {
++                    "calls": r["c"], "gemini": r["g"] or 0,
++                    "fallbacks": (r["c"] or 0) - (r["g"] or 0),
++                    "errors": r["f"] or 0,
++                }
++    except Exception:
++        pass
++    return out
++
++
++def provider_stats() -> dict:
++    """Per-provider totals: calls, ok-rate — the cascade grading feed."""
++    out: dict[str, dict] = {}
++    try:
++        _db.migrate()
++        with _db.connect() as conn:
++            for r in conn.execute(
++                    "SELECT provider, COUNT(*) c, SUM(ok) okc"
++                    " FROM usage GROUP BY provider"):
++                name = r["provider"] or "(unknown)"
++                c = r["c"] or 0
++                out[name] = {"calls": c,
++                             "ok_rate": round((r["okc"] or 0) / c, 3) if c else 0}
++    except Exception:
++        pass
++    return out
+diff --git a/agents/test_db.py b/agents/test_db.py
+new file mode 100644
+index 0000000..6c7ccc8
+--- /dev/null
++++ b/agents/test_db.py
+@@ -0,0 +1,175 @@
++"""Self-check for the SQLite seam (agents/db.py + agents/store.py).
++
++Run:  python -X utf8 agents/test_db.py   (repo root)
++Exit 0 = all checks green. Uses a fake agents.config (OUTPUT_DIR -> tmp dir)
++so the real Windows paths and the heavy agents/__init__ are never touched.
++The SQL itself runs for real against stdlib sqlite3 — no mocks.
++"""
++import importlib.util
++import os
++import shutil
++import sys
++import types
++from pathlib import Path
++
++_TMP = Path("/tmp/jodiac_db_test")
++
++
++def _load(env_home: str):
++    for m in ["agents", "agents.config", "agents.db", "agents.store"]:
++        sys.modules.pop(m, None)
++    cfg = types.ModuleType("agents.config")
++    cfg.OUTPUT_DIR = Path(env_home)
++    pkg = types.ModuleType("agents")
++    pkg.__path__ = []
++    sys.modules["agents"] = pkg
++    sys.modules["agents.config"] = cfg
++    for name, rel in (("agents.db", "agents/db.py"),
++                      ("agents.store", "agents/store.py")):
++        spec = importlib.util.spec_from_file_location(
++            name, os.path.join("agents", rel.split("/", 1)[1]))
++        mod = importlib.util.module_from_spec(spec)
++        sys.modules[name] = mod
++        spec.loader.exec_module(mod)
++    return sys.modules["agents.db"], sys.modules["agents.store"]
++
++
++CHECKS = []
++
++
++def check(name):
++    def deco(fn):
++        CHECKS.append((name, fn))
++        return fn
++    return deco
++
++
++@check("migrate: idempotent, version recorded, WAL mode")
++def _():
++    db, _ = _load(str(_TMP))
++    assert db.migrate() == 1
++    assert db.migrate() == 1  # second run is a no-op
++    assert db.current_version() == 1
++    assert db.journal_mode().lower() == "wal"
++    st = db.status()
++    assert st["version"] == 1 and "businesses" in st["tables"]
++    assert st["path"].endswith("jodiac.db")
++
++
++@check("businesses: upsert dedups on (session_id, ext_id)")
++def _():
++    db, store = _load(str(_TMP))
++    b1 = {"id": "b1", "name": "Alpha Coaching", "category": "education",
++          "phone": "111", "fit": {"score": 80, "fit": "fits",
++                                  "rationale": "teaches AutoCAD"}}
++    i1 = store.upsert_business("s1", b1)
++    assert i1 > 0
++    b1["fit"] = {"score": 92, "fit": "fits", "rationale": "updated"}
++    i2 = store.upsert_business("s1", b1)
++    assert i2 == i1  # same row updated, not duplicated
++    assert store.count_businesses("s1") == 1
++    i3 = store.upsert_business("s2", b1)  # other session -> new row
++    assert i3 != i1 and store.count_businesses() == 2
++    rows = store.list_businesses("s1")
++    assert rows[0]["fit_score"] == 92 and rows[0]["phone"] == "111"
++
++
++@check("businesses: list filters by verdict, orders by score")
++def _():
++    db, store = _load(str(_TMP))
++    store.upsert_business("s9", {"id": "a", "name": "A",
++                                 "fit": {"score": 10, "fit": "unlikely"}})
++    store.upsert_business("s9", {"id": "b", "name": "B",
++                                 "fit": {"score": 95, "fit": "fits"}})
++    store.upsert_business("s9", {"id": "c", "name": "C",
++                                 "fit": {"score": 50, "fit": "plausible"}})
++    fits = store.list_businesses("s9", verdict="fits")
++    assert [r["name"] for r in fits] == ["B"]
++    all_rows = store.list_businesses("s9")
++    assert [r["name"] for r in all_rows] == ["B", "C", "A"]
++
++
++@check("emails: draft -> sent lifecycle")
++def _():
++    db, store = _load(str(_TMP))
++    bid = store.upsert_business("s1", {"id": "b1", "name": "Alpha"})
++    eid = store.save_email("s1", "a@x.com", "Hi", "body text", business_id=bid)
++    assert eid > 0
++    drafts = store.list_emails("s1", kind="draft")
++    assert len(drafts) == 1 and drafts[0]["status"] == "draft"
++    assert store.mark_email_sent(eid, provider="resend") is True
++    assert store.list_emails("s1", kind="draft") == []
++    sent = store.list_emails("s1", kind="sent")
++    assert len(sent) == 1 and sent[0]["provider"] == "resend"
++    assert sent[0]["sent_at"] != ""
++
++
++@check("sessions: register, get, upsert on conflict")
++def _():
++    db, store = _load(str(_TMP))
++    assert store.register_session("sess1", name="N1", product="AutoCAD") is True
++    s = store.get_session("sess1")
++    assert s["name"] == "N1" and s["product"] == "AutoCAD"
++    store.register_session("sess1", name="N2", product="AutoCAD")
++    assert store.get_session("sess1")["name"] == "N2"
++    assert store.get_session("nope") == {}
++
++
++@check("usage: per-capability and per-provider stats")
++def _():
++    db, store = _load(str(_TMP))
++    store.log_usage("2026-10-02T10:00:00", "score_fit", ok=True,
++                    used_gemini=False, provider="zai")
++    store.log_usage("2026-10-02T10:00:01", "score_fit", ok=True,
++                    used_gemini=False, provider="zai")
++    store.log_usage("2026-10-02T10:00:02", "score_fit", ok=False,
++                    used_gemini=False, provider="groq")
++    store.log_usage("2026-10-02T10:00:03", "draft_email", ok=True,
++                    used_gemini=True, provider="gemini")
++    us = store.usage_stats()
++    assert us["score_fit"]["calls"] == 3
++    assert us["score_fit"]["fallbacks"] == 3  # none used gemini
++    assert us["score_fit"]["errors"] == 1
++    assert us["draft_email"]["gemini"] == 1
++    ps = store.provider_stats()
++    assert ps["zai"] == {"calls": 2, "ok_rate": 1.0}
++    assert ps["groq"] == {"calls": 1, "ok_rate": 0.0}
++    assert ps["gemini"]["calls"] == 1
++
++
++@check("resilience: broken DB path -> safe defaults, never raises")
++def _():
++    broken = "/tmp/jodiac_db_broken"
++    Path(broken).write_text("not a dir")
++    db, store = _load(broken)
++    assert store.upsert_business("s", {"id": "x", "name": "X"}) == 0
++    assert store.list_businesses("s") == []
++    assert store.count_businesses() == 0
++    assert store.save_email("s", "a@b.c", "s", "b") == 0
++    assert store.mark_email_sent(1) is False
++    assert store.register_session("s") is False
++    assert store.get_session("s") == {}
++    assert store.log_usage("t", "cap") is False
++    assert store.usage_stats() == {}
++    assert store.provider_stats() == {}
++    os.remove(broken)
++
++
++def main():
++    failed = 0
++    for name, fn in CHECKS:
++        shutil.rmtree(_TMP, ignore_errors=True)
++        try:
++            fn()
++        except Exception as e:
++            failed += 1
++            print(f"FAIL {name}: {type(e).__name__}: {e}")
++        else:
++            print(f"ok   {name}")
++    shutil.rmtree(_TMP, ignore_errors=True)
++    print(f"\n{len(CHECKS) - failed}/{len(CHECKS)} checks passed")
++    sys.exit(1 if failed else 0)
++
++
++if __name__ == "__main__":
++    main()
+-- 
+2.43.0
+
