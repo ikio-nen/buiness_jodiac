@@ -514,12 +514,25 @@ def brain_query(query: str, area: str = "") -> str:
 # ── Web search tool (the agents' own eyes) ──────────────────────────
 
 def web_search(query: str, timeout: int = 12) -> str:
-    """Fetch Bing results for a query and return title+snippet lines.
+    """Search the web and return title+snippet lines.
 
-    Best-effort: returns '' on any failure so the agent can answer without it.
+    Exa (neural search, keyed via env/config) first — it needs no scraping —
+    then the Bing scraper as fallback. Best-effort: returns '' on any failure
+    so the agent can answer without it.
     """
     if not query or not query.strip():
         return ""
+    q = query.strip()
+    try:
+        from . import outreach_apis as oa
+        r = oa.exa_search(q, max_results=6)
+        if "error" not in r and r.get("results"):
+            return "\n".join(
+                f"{it.get('title', '')} -- {it.get('content', '')[:220]}"
+                f" ({it.get('url', '')})"
+                for it in r["results"] if it.get("title"))
+    except Exception:
+        pass
     try:
         from scrapling.fetchers import Fetcher
         from urllib.parse import quote

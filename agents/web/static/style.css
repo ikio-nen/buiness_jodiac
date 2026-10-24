@@ -1885,3 +1885,54 @@ html[data-phase="night"]     { --sun-strength: .15; --dust-strength: .3; }
   0%, 100% { box-shadow: 0 0 0 0 rgba(111, 158, 88, .55); }
   50%      { box-shadow: 0 0 0 4px rgba(111, 158, 88, 0); }
 }
+
+/* ── Motion pass: a staff, not a set ───────────────────────────────
+   Skin only — every rule targets markup that already exists, and the
+   global prefers-reduced-motion block above neutralizes all of it. */
+
+/* Spawn: a bot pops into the room slightly compressed, then settles.
+   app.js adds .bot-spawn once and removes it; keep the anchor transform. */
+.bot.bot-spawn { animation: bot-in .55s cubic-bezier(.34, 1.45, .5, 1) both; }
+@keyframes bot-in {
+  from { opacity: 0; transform: translate(-50%, -92%) scale(.55); }
+  to   { opacity: 1; transform: translate(-50%, -100%) scale(1); }
+}
+
+/* Idle life: bots at rest breathe subtle figure sway, staggered so the room
+   never moves in lockstep. :not leaves walking/working/error/spawning alone
+   — those states own the sprite's existing animations. */
+.bot:not(.walking):not(.working):not(.error):not(.bot-spawn) .sprite {
+  animation: idle-breathe 3.4s ease-in-out infinite;
+}
+#botsLayer .bot:nth-child(2n) .sprite { animation-delay: -1.7s; }
+#botsLayer .bot:nth-child(3n) .sprite { animation-delay: -0.9s; }
+@keyframes idle-breathe {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50%      { transform: translateY(-1.5px) rotate(.6deg); }
+}
+
+/* Hover: a bot under the cursor lifts its face toward you. */
+.bot { transition: filter .15s ease; }
+.bot:hover { filter: brightness(1.06) drop-shadow(0 2px 0 rgba(61, 53, 41, .35)); }
+
+/* Roster strip: cards slide in on first build, lift on hover, and the
+   workload bar eases to its new width instead of snapping. */
+.roster-card { animation: card-in .35s ease both; }
+.roster-card:nth-child(2n) { animation-delay: .06s; }
+.roster-card:nth-child(3n) { animation-delay: .12s; }
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.roster-card { transition: transform .18s ease, box-shadow .18s ease; }
+.roster-card:hover { transform: translateY(-2px); box-shadow: 2px 3px 0 rgba(61, 53, 41, .25); }
+.roster-bar i { transition: width .45s cubic-bezier(.22, 1, .36, 1); }
+
+/* Station labels: when a station pulses on activity, its label hops too, so
+   the eye finds which work the packet belongs to. */
+.station .zone-label { transition: transform .18s ease; }
+.station.active .zone-label { transform: translateY(-2px); animation: label-hop .9s ease infinite; }
+@keyframes label-hop {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .72; }
+}

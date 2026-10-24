@@ -81,15 +81,31 @@ def get_sender_name() -> str:
 def set_sender_name(name: str):
     cfg = load_config()
     cfg["sender_name"] = name
-    save_config(cfg)
+    save_config(cfg)# ── Gemini AI ─────────────────────────────────────────────────────────
+EXA_ENV_NAME = "EXA_API_KEY"
 
-# ── Gemini AI ─────────────────────────────────────────────────────────
 def get_gemini_key() -> str:
     return load_config().get("gemini_api_key", "")
+
 
 def set_gemini_key(key: str):
     cfg = load_config()
     cfg["gemini_api_key"] = key
+    save_config(cfg)
+
+
+def get_exa_key() -> str:
+    """Exa search key. Env var wins so a key never has to touch disk."""
+    import os
+    env = os.environ.get(EXA_ENV_NAME, "")
+    if env:
+        return env.strip()
+    return load_config().get("exa_api_key", "")
+
+
+def set_exa_key(key: str):
+    cfg = load_config()
+    cfg["exa_api_key"] = key
     save_config(cfg)
 
 def get_ai_model() -> str:

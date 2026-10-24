@@ -494,6 +494,10 @@ function getBot(name) {
   el.style.top = home.y + '%';
   botsLayer.appendChild(el);
   bots[name] = { el, bubbleEl: null, bubbleTimer: null, walkTimer: null };
+  // Spawn entrance: pop in from slightly compressed, then hand the bot over
+  // to the idle breathing loop in style.css.
+  el.classList.add('bot-spawn');
+  setTimeout(() => el.classList.remove('bot-spawn'), 620);
   return bots[name];
 }
 
