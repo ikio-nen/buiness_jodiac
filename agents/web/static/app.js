@@ -683,11 +683,16 @@ function rosterPing(name, state, countMsg = true) {
       : state ? 'working' : 'idle';
   }
   rc.card.title = `${rc.msgs} office event${rc.msgs === 1 ? '' : 's'} this session`;
+  // An error keeps its attention state until the agent's NEXT event —
+  // errors that fade after a second get missed. Everything else winds
+  // back to idle on its usual timer.
   clearTimeout(rc.activeTimer);
-  rc.activeTimer = setTimeout(() => {
-    rc.card.classList.remove('active', 'done', 'error');
-    if (rc.stateEl) { rc.stateEl.dataset.state = 'idle'; rc.stateEl.textContent = 'idle'; }
-  }, state === 'error' ? 1200 : 2500);
+  if (state !== 'error') {
+    rc.activeTimer = setTimeout(() => {
+      rc.card.classList.remove('active', 'done');
+      if (rc.stateEl) { rc.stateEl.dataset.state = 'idle'; rc.stateEl.textContent = 'idle'; }
+    }, 2500);
+  }
 }
 
 // Packet: a little envelope hops from one zone to another (no lanes)
@@ -745,19 +750,58 @@ const STATUS_TEXT = {
   'error': 'error ✖',
 };
 
-function opsFeedLine(chip, chipCls, text, cls = '') {
+function opsFeedLine(chip, chipCls, text, cls = '', clickBot = '') {
   const idle = opsFeed.querySelector('.ops-idle');
   if (idle) idle.remove();
   const line = document.createElement('div');
   line.className = 'ops-feed-line ' + cls;
   const t = new Date().toLocaleTimeString([], { hour12: false });
-  line.innerHTML = `<span class="feed-time">${t}</span>`
-    + `<span class="feed-chip ${chipCls}">${esc(chip)}</span>`
-    + text;
+  line.innerHTML = `<span class="feed-time">${t}</span>`;
+  const chipEl = document.createElement('span');
+  chipEl.className = 'feed-chip ' + chipCls;
+  chipEl.textContent = chip;
+  // A bot's chip is the feed's own inspect affordance: click it and the
+  // command center opens that agent's pane (shortlist #4 — overview in the
+  // room, detail on demand).
+  if (clickBot) {
+    chipEl.classList.add('feed-chip-live');
+    chipEl.title = `Open the ${clickBot} agent`;
+    chipEl.addEventListener('click', () => openAgentPane(clickBot));
+  }
+  line.appendChild(chipEl);
+  const body = document.createElement('span');
+  body.innerHTML = text;
+  line.appendChild(body);
   opsFeed.appendChild(line);
   while (opsFeed.children.length > 30) opsFeed.firstChild.remove();
   opsFeed.scrollTop = opsFeed.scrollHeight;
 }
+
+// ── Office counters (three live numbers by the roster) ───────────
+// Cumulative session truth, driven by the same events that move the bots:
+// work started, work finished, work failed. No polling, no estimates.
+const ocEls = {
+  active: document.getElementById('ocActive'),
+  done: document.getElementById('ocDone'),
+  err: document.getElementById('ocErr'),
+};
+const ocChips = {
+  active: document.querySelector('.oc-active'),
+  done: document.querySelector('.oc-done'),
+  err: document.querySelector('.oc-err'),
+};
+
+function bumpCounter(kind) {
+  if (!ocEls.active) return;
+  const bump = { active: 1, done: 1, err: 1 }[kind] || 0;
+  if (!bump) return;
+  const n = (officeCounts[kind] = (officeCounts[kind] || 0) + 1);
+  ocEls[kind].textContent = n;
+  ocChips[kind].classList.remove('oc-zero');
+  ocChips[kind].classList.add('pop');
+  setTimeout(() => ocChips[kind].classList.remove('pop'), 380);
+}
+const officeCounts = { active: 0, done: 0, err: 0 };
 
 function handleAgentEvent(ev, silent = false) {
   if (!ev || !ev.kind) return;
@@ -770,9 +814,10 @@ function handleAgentEvent(ev, silent = false) {
     pulseStation(botStation(botName));
     if (ev.task) botSay(botName, String(ev.task).slice(0, 90));
     rosterPing(botName, status);
-    const cls = status === 'error' ? 'feed-err' : (status === 'done' ? 'feed-done' : '');
-    opsFeedLine(botName.toUpperCase(), 'feed-chip-bot',
-      `${esc(STATUS_TEXT[status] || status)} — ${esc(ev.task || '')}`, cls);
+  const cls = status === 'error' ? 'feed-err' : (status === 'done' ? 'feed-done' : '');
+  bumpCounter(status === 'error' ? 'err' : status === 'done' ? 'done' : 'active');
+  opsFeedLine(botName.toUpperCase(), 'feed-chip-bot',
+    `${esc(STATUS_TEXT[status] || status)} — ${esc(ev.task || '')}`, cls, botName);
 
   } else if (ev.kind === 'packet') {
     // Packet endpoints are a mix: some are stages ('pipeline', 'drafts',
@@ -798,6 +843,7 @@ function handleAgentEvent(ev, silent = false) {
     ['scout', 'strategist', 'analyst'].forEach(n => {
       setBotStatus(n, ev.status === 'done' ? 'done' : 'working');
     });
+    bumpCounter(ev.status === 'done' ? 'done' : 'active');
     opsFeedLine('TEAM', 'feed-chip-team', `${esc(ev.status || '')}: ${esc(ev.task || '')}`);
 
   } else if (ev.kind === 'step') {
@@ -807,6 +853,7 @@ function handleAgentEvent(ev, silent = false) {
       send: 'station-mailer', sync: 'station-brain',
     }[ev.phase] || 'station-brain';
     pulseStation(phaseStation, 3000);
+    if (!silent) bumpCounter(ev.failed ? 'err' : ev.done ? 'done' : 'active');
     if (!silent && !ev.done) {
       opsFeedLine((ev.phase || '?').toUpperCase(), 'feed-chip-step', esc(ev.message || ''));
     } else {

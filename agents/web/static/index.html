@@ -9,7 +9,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=45">
+  <link rel="stylesheet" href="/static/style.css?v=46">
 </head>
 <body>
   <div class="app">
@@ -213,6 +213,12 @@
 
     <!-- ── Bottom: team roster strip ───────────────────────────── -->
     <footer class="roster-strip">
+      <div class="roster-counters" id="officeCounters"
+           title="Office activity this session — who started, finished, or failed">
+        <span class="oc oc-active oc-zero"><i>▸</i> on it <b id="ocActive">0</b></span>
+        <span class="oc oc-done oc-zero"><i>✔</i> done <b id="ocDone">0</b></span>
+        <span class="oc oc-err oc-zero"><i>✖</i> err <b id="ocErr">0</b></span>
+      </div>
       <div class="roster-scroller" id="opsRoster"></div>
       <button class="add-skill-btn" id="teachBtn" title="Teach the team a new skill">＋<br>skill</button>
     </footer>
@@ -281,7 +287,7 @@
     <div class="status-content vault-body" id="vaultBody" aria-live="polite">Locked.</div>
   </div>
 
-  <script type="module" src="/static/app.js?v=45"></script>
+  <script type="module" src="/static/app.js?v=46"></script>
   <script type="module" src="/static/js/campaign.js?v=44"></script>
   <script type="module" src="/static/js/vault.js?v=44"></script>
 </body>

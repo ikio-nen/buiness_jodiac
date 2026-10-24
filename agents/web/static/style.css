@@ -1936,3 +1936,40 @@ html[data-phase="night"]     { --sun-strength: .15; --dust-strength: .3; }
   0%, 100% { opacity: 1; }
   50%      { opacity: .72; }
 }
+
+/* ── Office counters + attention (from the similar-projects pass) ── */
+
+/* Three live numbers anchored at the left of the roster strip: work started,
+   finished, failed — the glanceable layer Mohano/Age of Agents put above
+   their rooms. Zero states stay quiet; every bump pops once. */
+.roster-counters {
+  flex: none;
+  display: flex; flex-direction: column; gap: 5px; justify-content: center;
+  padding-right: 10px; margin-right: 2px;
+  border-right: 1px dashed var(--line-warm);
+}
+.oc {
+  display: flex; gap: 4px; align-items: baseline; justify-content: flex-end;
+  font-family: var(--pixel-font); font-size: 7px; letter-spacing: .5px;
+  color: var(--ink-soft); white-space: nowrap;
+}
+.oc i { font-style: normal; font-size: 8px; }
+.oc b { font-family: var(--pixel-font); font-size: 9px; color: var(--ink); min-width: 14px; text-align: right; }
+.oc.oc-zero b { color: var(--ink-soft); }
+.oc.pop { animation: oc-pop .35s ease; }
+@keyframes oc-pop { 40% { transform: scale(1.14); } }
+.oc-active b { color: var(--accent); }
+.oc-done b, .oc-done i { color: var(--green-ok); }
+.oc-err b, .oc-err i { color: var(--red-bad); }
+
+/* An error keeps its attention marker until the agent's next event —
+   a shake that ends after half a second gets missed in a busy room. */
+.bot.error .bot-tag { border-color: var(--red-bad); color: var(--red-bad); }
+.bot.error .sp-badge { background: var(--red-bad); }
+.roster-card.error { border-color: var(--red-bad); }
+.roster-card.error .roster-state { color: var(--red-bad); }
+
+/* Feed chips that open an agent's pane read as clickable. */
+.feed-chip.feed-chip-live { cursor: pointer; text-decoration: underline dotted rgba(61, 53, 41, 0); }
+.feed-chip.feed-chip-live::after { content: ' ↗'; font-size: 11px; }
+.feed-chip.feed-chip-live:hover { background: var(--accent-soft); }
