@@ -1,3 +1,6 @@
+
 @echo off
 cd /d "%~dp0"
-"E:\python.exe" -m agents.jarvis %*
+set "JODIAC_HOME=%~dp0jodiac_data"
+set "JODIAC_OBSIDIAN=%~dp0jodiac_data\obsidian"
+python -m agents.jarvis %*

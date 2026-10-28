@@ -1,8 +1,20 @@
 import sys, os, json, shutil
 from unittest import mock
-sys.path.insert(0, '.')
+
+# Repo root, derived from this file so the suite runs from any cwd.
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
 
 results = {}
+
+
+def _rm_session(sid):
+    """Delete a scratch session from the configured data root (JODIAC_HOME)."""
+    try:
+        from agents.config import OUTPUT_DIR
+        shutil.rmtree(OUTPUT_DIR / "sessions" / sid, ignore_errors=True)
+    except Exception:
+        pass
 
 # 1. Imports
 try:
@@ -31,8 +43,7 @@ except Exception as e:
     results['session'] = f'FAIL: {e}'
 finally:
     if sid_session:
-        shutil.rmtree(os.path.join('F:/jodiac/agent_output/sessions', sid_session),
-                      ignore_errors=True)
+        _rm_session(sid_session)
 
 # 3. Map search + filter
 try:
@@ -210,8 +221,7 @@ except Exception as e:
     results['complete_outreach_persistence'] = f'FAIL: {e}'
 finally:
     if sid:
-        shutil.rmtree(os.path.join('F:/jodiac/agent_output/sessions', sid),
-                      ignore_errors=True)
+        _rm_session(sid)
 
 # 12e. Category filter: tag kill-list beats misleading names (no AI needed)
 try:

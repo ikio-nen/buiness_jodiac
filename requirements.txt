@@ -3,8 +3,17 @@
 fastapi
 uvicorn[standard]
 python-multipart
-scrapling
-reportlab
+
+# Web scraping. The [fetchers] extra is REQUIRED: scrapling's `Fetcher` resolves
+# through curl_cffi -> patchright -> browserforge at attribute access, so a plain
+# `pip install scrapling` leaves every module that does
+# `from scrapling.fetchers import Fetcher` (contact_finder, business_enricher,
+# maps_contact_fallback -> workflows -> pipeline_handler) failing to import.
+scrapling[fetchers]
+
+google-genai    # Gemini SDK; ai_engine / gemini_client import it lazily
+reportlab       # PDF reports (pdf_gen / pdf_theme / campaign)
+
 ddgs            # keyless multi-backend web search (website discovery, agent research)
 dnspython       # MX deliverability checks for found emails
 phonenumbers    # libphonenumber: phone validation, E.164, WhatsApp-ready mobiles

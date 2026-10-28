@@ -14,7 +14,7 @@ and got convent schools and engineering colleges back. This proves the fix:
    the Kolkata run flood-filled results with venues (auditorium, library,
    campus-tagged schools) because plausible ICP verdicts resurrected them.
 
-Run:  E:/python.exe -X utf8 agents/test_category_exclusions.py
+Run:  E:/python.exe -X utf8 tests/test_category_exclusions.py
 """
 import sys
 import os

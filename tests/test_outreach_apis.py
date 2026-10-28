@@ -1,6 +1,6 @@
 """Self-check for agents/outreach_apis.py.
 
-Run:  python -X utf8 agents/test_outreach_apis.py   (repo root)
+Run:  python -X utf8 tests/test_outreach_apis.py   (repo root)
 Exit 0 = all checks green. No network, no keys — urllib is stubbed and the
 captured requests are asserted (URL, headers, payload shape).
 """
@@ -14,8 +14,9 @@ import urllib.error
 import urllib.request
 
 # outreach_apis.py is stdlib-only: load it straight from the file.
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 spec = importlib.util.spec_from_file_location(
-    "outreach_apis_under_test", os.path.join("agents", "outreach_apis.py"))
+    "outreach_apis_under_test", os.path.join(_ROOT, "agents", "outreach_apis.py"))
 oa = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(oa)
 

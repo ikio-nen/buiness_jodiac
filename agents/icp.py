@@ -141,7 +141,7 @@ _CAD_NEVER_NAMES = (
 # STRUCTURE, not an organization. OSM maps all of these (campus buildings
 # even inherit the campus's college tag), and none of them can buy anything
 # for any goal. One gate for the whole class instead of a patch per leak;
-# the whole class is pinned as a corpus in agents/test_category_exclusions.py.
+# the whole class is pinned as a corpus in tests/test_category_exclusions.py.
 
 # Compound heads: a place even when an org word sits inside the name
 # ("B. K. Paul's Institution Ground" contains 'institution' — still a ground).

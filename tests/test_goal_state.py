@@ -13,7 +13,7 @@ goal=websites) with nothing user-settable to override it. The contract now:
   4. resolve_goal stamps _source on a COPY — the GOALS registry is shared
      module state and must never be mutated by resolution.
 
-Run: "E:/python.exe" -X utf8 agents/test_goal_state.py
+Run: "E:/python.exe" -X utf8 tests/test_goal_state.py
 """
 import sys
 from pathlib import Path

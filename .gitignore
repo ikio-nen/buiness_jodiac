@@ -1,4 +1,5 @@
-# Output directories
+# Data roots (JODIAC_HOME points here; config.json with API keys lives inside)
+jodiac_data/
 agent_output/
 output/
 
@@ -18,30 +19,17 @@ build/
 .DS_Store
 Thumbs.db
 
-# Temp
+# Temp / logs
 *.tmp
 *.log
+*.log.err
 .freebuff/
+.freebuffpreview-*
 
 # Scratch / runtime artifacts (probe dumps, server pids, screenshots)
 _*.txt
 _*.json
 _*.bat
-.freebuffpreview-*
 server.pid
 server_pid.txt
-*.log.err
-rakshanet/_static.*
-rakshanet/backend/_api.*
-rakshanet/backend/relief_state.json
 /*.png
-du_e.txt
-kavach_hero_preview.html
-nivox_*.html
-pdf_check.html
-calculus-visualizations.html
-
-# Memory DB (user data)
-agent_output/memory/
-agent_output/knowledge_base/
-agent_output/sessions/

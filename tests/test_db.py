@@ -1,6 +1,6 @@
 """Self-check for the SQLite seam (agents/db.py + agents/store.py).
 
-Run:  python -X utf8 agents/test_db.py   (repo root)
+Run:  python -X utf8 tests/test_db.py   (repo root)
 Exit 0 = all checks green. Uses a fake agents.config (OUTPUT_DIR -> tmp dir)
 so the real Windows paths and the heavy agents/__init__ are never touched.
 The SQL itself runs for real against stdlib sqlite3 — no mocks.
@@ -13,6 +13,7 @@ import types
 from pathlib import Path
 
 _TMP = Path("/tmp/jodiac_db_test")
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _load(env_home: str):
@@ -27,7 +28,7 @@ def _load(env_home: str):
     for name, rel in (("agents.db", "agents/db.py"),
                       ("agents.store", "agents/store.py")):
         spec = importlib.util.spec_from_file_location(
-            name, os.path.join("agents", rel.split("/", 1)[1]))
+            name, os.path.join(_ROOT, "agents", rel.split("/", 1)[1]))
         mod = importlib.util.module_from_spec(spec)
         sys.modules[name] = mod
         spec.loader.exec_module(mod)

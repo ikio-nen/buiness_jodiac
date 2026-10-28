@@ -1,6 +1,6 @@
 """Self-check for the free-provider cascade in agents/ai/providers.py.
 
-Run:  python -X utf8 agents/test_provider_cascade.py   (repo root)
+Run:  python -X utf8 tests/test_provider_cascade.py   (repo root)
 Exit 0 = all checks green. No network, no keys — _post_to is stubbed and a
 fake agents.config module is injected, so the real Windows config paths and
 the google-genai SDK are never touched.
@@ -79,8 +79,8 @@ def _load_providers():
     ai_pkg.__path__ = []
     sys.modules["agents.ai"] = ai_pkg
     sys.modules["agents.ai.schemas"] = _fake_schemas_module()
-    here = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(here, "ai", "providers.py")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(root, "agents", "ai", "providers.py")
     spec = importlib.util.spec_from_file_location("agents.ai.providers", path)
     mod = importlib.util.module_from_spec(spec)
     sys.modules["agents.ai.providers"] = mod
