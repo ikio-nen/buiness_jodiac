@@ -56,6 +56,7 @@ Thumbs.db
 _*.txt
 _*.json
 _*.bat
+jodiac_handoff.zip
 server.pid
 server_pid.txt
 /*.png

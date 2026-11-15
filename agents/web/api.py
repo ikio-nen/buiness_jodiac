@@ -327,6 +327,75 @@ _MAP_DRAFT_FACTS = (
 )
 
 
+# The drafter is told it knows only a name and a course type, and it still
+# wrote "I looked at the Justdial reviews ... over 1,200 ratings" for a lead we
+# hold no research for. An instruction cannot be trusted with a fact that must
+# never appear, so the body is checked for evidence claims after generation and
+# replaced with the house template when it invents any.
+_INVENTED_EVIDENCE = re.compile(
+    r"(justdial|google reviews?|tripadvisor|trustpilot|yelp|glassdoor"
+    r"|\d[\d,]*\s*\+?\s*(?:ratings?|reviews?)|star[- ]rated|review count)",
+    re.IGNORECASE,
+)
+
+# "your Sholinganallur location" / "our centre in Kolkata": the row carries no
+# locality, so a place next to their premises is always made up. Case-sensitive
+# on purpose -- a capitalised place name is the tell, and the house template
+# ("I looked at {biz}'s training setup") must not trip it.
+_INVENTED_PLACE = re.compile(
+    r"\byour\s+[A-Z][a-z]+\s+(?:location|branch|campus)"
+    r"|\b(?:centre|center|institute|office|branch)\s+(?:in|at)\s+[A-Z][a-z]+"
+)
+
+
+def _invented_evidence(text: str) -> str:
+    """The first fabricated claim in a body, or "" when it is clean."""
+    for pattern in (_INVENTED_EVIDENCE, _INVENTED_PLACE):
+        hit = pattern.search(text or "")
+        if hit:
+            return hit.group(0)
+    return ""
+
+# Mailboxes that say nothing about which branch owns them.
+_PLAIN_MAILBOX = {
+    "info", "contact", "enquiry", "enquiries", "inquiry", "admin", "office",
+    "support", "sales", "hello", "mail", "reach", "care", "team", "help",
+    "admissions", "admission", "hr", "marketing", "course", "courses",
+}
+
+
+def _foreign_branch(row: dict) -> str:
+    """A branch-qualified mailbox that belongs to a different branch.
+
+    Franchise brands publish every branch on one domain: the Kolkata page of
+    caddcentre.com yielded ``tn.mylapore@caddcentre.com`` -- Tamil Nadu's
+    Mylapore centre. The address is real, deliverable and entirely the wrong
+    recipient, which is exactly the failure a "verified" flag is supposed to
+    rule out. Flagged only for location pages, so ordinary company mailboxes
+    on a normal site are untouched.
+    """
+    url = str(row.get("website") or "").lower()
+    email_addr = str(row.get("email") or "").lower()
+    if not url or "@" not in email_addr:
+        return ""
+    if "/location" not in url and "/centre" not in url and "/center" not in url:
+        return ""
+    local = email_addr.split("@")[0]
+    tokens = [t for t in re.split(r"[^a-z0-9]+", local) if len(t) >= 2]
+    context = set(re.split(r"[^a-z0-9]+", url + " " + str(row.get("name") or "").lower()))
+    strays = [t for t in tokens if t not in _PLAIN_MAILBOX and t not in context]
+    return strays[0] if strays else ""
+
+
+def _map_template_draft(biz: dict, sender: str) -> tuple[str, str]:
+    """The deterministic house draft: no claim the row cannot support."""
+    from agents import email_copy
+    issue = email_copy.issue_line(biz["name"], biz.get("category", ""))
+    body = email_copy.compose_body(
+        issue, greeting=email_copy.greeting_for("", biz["name"]), sender=sender)
+    return f"Licensed AutoCAD seats for {biz['name']}", body
+
+
 @router.post("/api/map/draft")
 def api_map_draft(body: dict):
     """Draft outreach for one pin's sendable leads, with no chat turn involved.
@@ -356,6 +425,10 @@ def api_map_draft(body: dict):
         if r.get("email_verified") is False:
             refused.append(name)
             continue
+        stray = _foreign_branch({"website": r.get("website"), "email": to, "name": name})
+        if stray:
+            refused.append(f"{name} ({to} looks like another branch: '{stray}')")
+            continue
         if to.lower() in seen:
             continue
         seen.add(to.lower())
@@ -377,7 +450,7 @@ def api_map_draft(body: dict):
 
         goal = resolve_goal()
         sender = get_sender_name()
-        drafts, errors = [], []
+        drafts, errors, notes = [], [], []
         for biz in clean:
             # The copy promises the flyer, so attach the same proposal PDF the
             # chat path attaches. A missing PDF must not block the draft.
@@ -409,15 +482,28 @@ def api_map_draft(body: dict):
             if not out.get("subject") or not out.get("body"):
                 errors.append({"name": biz["name"], "error": "empty draft"})
                 continue
+            subject, text = out.get("subject", ""), out.get("body", "")
+            ai_powered = bool(out.get("ai_powered"))
+            claim = _invented_evidence(text)
+            if claim:
+                # Keep the mail, drop the fabrication: the template says the
+                # same thing without pretending to have looked anything up.
+                subject, text = _map_template_draft(biz, sender)
+                ai_powered = False
+                notes.append({"name": biz["name"],
+                              "note": f"invented evidence '{claim}' — template copy used"})
             drafts.append({
                 "to": out.get("to") or biz["email"],
                 "name": biz["name"],
-                "subject": out.get("subject", ""),
-                "body": out.get("body", ""),
-                "ai_powered": bool(out.get("ai_powered")),
+                "subject": subject,
+                "body": text,
+                "ai_powered": ai_powered,
                 "pdf_path": pdf_path,
+                # Carried through the panel so the send leg can re-run the
+                # branch check on its own copy of the row.
+                "website": biz["website"],
             })
-        return {"drafts": drafts, "errors": errors, "refused": refused}
+        return {"drafts": drafts, "errors": errors, "notes": notes, "refused": refused}
     except Exception as e:
         err = _sanitize_error(e, "map draft")
         return {"error": err["error"], "error_id": err["error_id"], "drafts": []}
@@ -487,6 +573,10 @@ def api_map_send(body: dict):
         name = str(d.get("name") or d.get("to") or "")[:160]
         if not to or not subject or not text:
             invalid.append(name or "(unnamed)")
+            continue
+        stray = _foreign_branch({"website": d.get("website"), "email": to, "name": name})
+        if stray:
+            invalid.append(f"{name} ({to} looks like another branch: '{stray}')")
             continue
         if to.lower() in bounced:
             # Known dead inbox: sending again just earns another bounce, and

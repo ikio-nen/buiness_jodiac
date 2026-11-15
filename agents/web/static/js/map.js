@@ -369,6 +369,10 @@ async function draftForPin(pin) {
   renderPinList();
   const failed = (data.errors || []).length;
   logLine(`  ${pin.drafts.length} drafted${failed ? ` · ${failed} failed` : ''} — review, then send`);
+  // A fabricated claim is replaced with template copy, not hidden: say so.
+  for (const n of (data.notes || []).slice(0, 4)) logLine(`  · ${n.name}: ${n.note}`);
+  for (const r of (data.refused || []).slice(0, 4)) logLine(`  · refused ${r}`);
+  for (const e of (data.errors || []).slice(0, 4)) logLine(`  · ${e.name}: ${e.error}`);
 }
 
 async function sendDrafts(pin) {

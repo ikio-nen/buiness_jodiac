@@ -1077,13 +1077,32 @@ body {
    it also creates a containing block and that is a behaviour change we
    do not want on the app shell. */
 
-.topbar, .cmd, .side-panel {
+.topbar, .cmd {
   background: linear-gradient(155deg, rgba(82, 16, 32, 0.34), rgba(18, 10, 13, 0.68)) !important;
   border-color: var(--line) !important;
   box-shadow: inset 0 1px 0 rgba(244, 235, 219, 0.10), 0 22px 60px rgba(0, 0, 0, 0.45) !important;
 }
 
-.menu-list, .slash-menu, .status-panel, .queue-panel, .pin-leads, .lead-row {
+/* The Locations panel is a full-height drawer over the office, not a floating
+   card: at anything below full opacity the chat text reads through the pin
+   list and the panel becomes unreadable. Opaque, no backdrop-filter. */
+.side-panel {
+  background: linear-gradient(168deg, #2c0e17 0%, #170a0e 45%, #0f0709 100%) !important;
+  border-right: 1px solid var(--line-warm) !important;
+  box-shadow: inset 0 1px 0 rgba(244, 235, 219, 0.10), 28px 0 70px rgba(0, 0, 0, 0.6) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Surfaces inside the panel stack on that opaque fill, so they stay opaque too:
+   a translucent card here still shows the pin row underneath it. */
+.pin-leads, .lead-row, .pin-drafts {
+  background: #150a0e !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.menu-list, .slash-menu, .status-panel, .queue-panel {
   background: linear-gradient(155deg, rgba(60, 12, 24, 0.72), rgba(14, 7, 10, 0.86)) !important;
   backdrop-filter: blur(18px) saturate(130%);
   -webkit-backdrop-filter: blur(18px) saturate(130%);
