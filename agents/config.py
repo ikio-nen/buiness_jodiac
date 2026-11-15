@@ -3,14 +3,20 @@ import json
 import os
 from pathlib import Path
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 # ── Paths ──────────────────────────────────────────────────────────────
-# Portable roots: JODIAC_HOME replaces the F:/jodiac drive letter and
-# JODIAC_OBSIDIAN replaces D:/brain, so the project runs on machines without
-# those drives. Unset/empty = previous behavior (the F:/D:/ laptop is
-# unaffected). Note the `or`, not a default arg: an EMPTY env var would
-# otherwise resolve to Path('.') and drop the data dirs into the cwd.
-_JODIAC_HOME = Path(os.environ.get("JODIAC_HOME") or "F:/jodiac")
-PROJECT_ROOT = Path(__file__).parent.parent
+# Portable roots: JODIAC_HOME defaults to the local jodiac_data directory and
+# JODIAC_OBSIDIAN defaults to local jodiac_data/obsidian, so the project runs self-contained.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_DEFAULT_HOME = PROJECT_ROOT / "jodiac_data"
+_DEFAULT_OBSIDIAN = _DEFAULT_HOME / "obsidian"
+
+_JODIAC_HOME = Path(os.environ.get("JODIAC_HOME") or _DEFAULT_HOME)
 OUTPUT_DIR = _JODIAC_HOME / "agent_output"
 SITES_DIR = OUTPUT_DIR / "sites"
 REPORTS_DIR = OUTPUT_DIR / "reports"
@@ -18,7 +24,7 @@ EMAILS_DIR = OUTPUT_DIR / "emails"
 DATA_DIR = OUTPUT_DIR / "data"
 SESSIONS_DIR = OUTPUT_DIR / "sessions"
 PDF_DIR = OUTPUT_DIR / "pdfs"
-OBSIDIAN_VAULT = Path(os.environ.get("JODIAC_OBSIDIAN") or "D:/brain/brain")
+OBSIDIAN_VAULT = Path(os.environ.get("JODIAC_OBSIDIAN") or _DEFAULT_OBSIDIAN)
 OBSIDIAN_PROJECTS = OBSIDIAN_VAULT / "projects"
 OBSIDIAN_CONTACTS = OBSIDIAN_VAULT / "contacts"
 OBSIDIAN_REPORTS = OBSIDIAN_VAULT / "reports"
@@ -55,49 +61,119 @@ def load_config() -> dict:
 def save_config(cfg: dict):
     CONFIG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 
+
+def get_secret_with_precedence(env_var: str, vault_key: str, config_key: str) -> str:
+    """Key resolution with strict precedence:
+    1) os.environ (highest priority)
+    2) encrypted vault.json
+    3) config.json fallback (backward compatibility)
+    """
+    env_val = os.environ.get(env_var, "").strip()
+    if env_val:
+        return env_val
+    try:
+        from agents.web.vault import get_vault_secret
+        vault_val = get_vault_secret(vault_key)
+        if vault_val:
+            return vault_val.strip()
+    except Exception:
+        pass
+    return str(load_config().get(config_key, "") or "").strip()
+
+
+def migrate_plaintext_keys_to_vault(strip_from_config: bool = False) -> dict:
+    """Migrate plaintext secrets from config.json to encrypted vault.json."""
+    from agents.web.vault import migrate_from_config
+    return migrate_from_config(strip_from_config=strip_from_config)
+
+
 def get_hunter_key() -> str:
-    return load_config().get("hunter_api_key", "")
+    return get_secret_with_precedence("HUNTER_API_KEY", "hunter_api_key", "hunter_api_key")
 
 def set_hunter_key(key: str):
     cfg = load_config()
     cfg["hunter_api_key"] = key
     save_config(cfg)
+    try:
+        from agents.web.vault import set_vault_secret
+        set_vault_secret("hunter_api_key", key)
+    except Exception:
+        pass
 
 def get_gmail_user() -> str:
-    return load_config().get("gmail_user", "")
+    return get_secret_with_precedence("GMAIL_USER", "gmail_user", "gmail_user")
 
 def get_gmail_app_password() -> str:
-    return load_config().get("gmail_app_password", "")
+    return get_secret_with_precedence("GMAIL_APP_PASSWORD", "gmail_app_password", "gmail_app_password")
 
 def set_gmail(user: str, app_password: str):
     cfg = load_config()
     cfg["gmail_user"] = user
     cfg["gmail_app_password"] = app_password
     save_config(cfg)
+    try:
+        from agents.web.vault import set_vault_secret
+        set_vault_secret("gmail_user", user)
+        set_vault_secret("gmail_app_password", app_password)
+    except Exception:
+        pass
 
 def get_sender_name() -> str:
-    return load_config().get("sender_name", "The Team")
+    return os.environ.get("SENDER_NAME", "").strip() or load_config().get("sender_name", "Autodesk Educational Solutions")
 
 def set_sender_name(name: str):
     cfg = load_config()
     cfg["sender_name"] = name
     save_config(cfg)
 
+def get_whatsapp_number() -> str:
+    """Return the outreach WhatsApp contact number."""
+    return os.environ.get("OUTREACH_WHATSAPP", "").strip() or load_config().get("outreach_whatsapp", "+91 6296 142368")
+
+def set_whatsapp_number(number: str):
+    """Set the outreach WhatsApp contact number."""
+    cfg = load_config()
+    cfg["outreach_whatsapp"] = number
+    save_config(cfg)
+
 # ── Gemini AI ─────────────────────────────────────────────────────────
+EXA_ENV_NAME = "EXA_API_KEY"
+
 def get_gemini_key() -> str:
-    return load_config().get("gemini_api_key", "")
+    return get_secret_with_precedence("GEMINI_API_KEY", "gemini_api_key", "gemini_api_key")
+
 
 def set_gemini_key(key: str):
     cfg = load_config()
     cfg["gemini_api_key"] = key
     save_config(cfg)
+    try:
+        from agents.web.vault import set_vault_secret
+        set_vault_secret("gemini_api_key", key)
+    except Exception:
+        pass
+
+
+def get_exa_key() -> str:
+    return get_secret_with_precedence(EXA_ENV_NAME, "exa_api_key", "exa_api_key")
+
+
+def set_exa_key(key: str):
+    cfg = load_config()
+    cfg["exa_api_key"] = key
+    save_config(cfg)
+    try:
+        from agents.web.vault import set_vault_secret
+        set_vault_secret("exa_api_key", key)
+    except Exception:
+        pass
 
 def get_ai_model() -> str:
-    return load_config().get("ai_model", "gemini-3.5-flash-lite")
+    return os.environ.get("AI_MODEL", "").strip() or load_config().get("ai_model", "gemini-3.5-flash-lite")
 
 
 def get_ai_provider() -> str:
-    return load_config().get("ai_provider", "gemini")
+    return os.environ.get("AI_PROVIDER", "").strip() or load_config().get("ai_provider", "gemini")
 
 
 def set_ai_provider(provider: str):
@@ -107,7 +183,7 @@ def set_ai_provider(provider: str):
 
 
 def get_ai_provider_model() -> str:
-    return load_config().get("ai_provider_model", "")
+    return os.environ.get("AI_PROVIDER_MODEL", "").strip() or load_config().get("ai_provider_model", "")
 
 
 def set_ai_provider_model(model: str):
@@ -136,7 +212,7 @@ def set_ai_provider_fallbacks(providers: list):
 
 
 def get_ai_provider_base_url() -> str:
-    return load_config().get("ai_provider_base_url", "")
+    return os.environ.get("AI_PROVIDER_BASE_URL", "").strip() or load_config().get("ai_provider_base_url", "")
 
 
 def set_ai_provider_base_url(url: str):
@@ -146,12 +222,7 @@ def set_ai_provider_base_url(url: str):
 
 
 def get_ai_provider_key() -> str:
-    # Env var wins so a key never has to touch config.json on disk.
-    import os
-    env = os.environ.get("AI_PROVIDER_KEY", "")
-    if env:
-        return env
-    return load_config().get("ai_provider_key", "")
+    return get_secret_with_precedence("AI_PROVIDER_KEY", "ai_provider_key", "ai_provider_key")
 
 
 # NOTE: no set_ai_provider_key here is deliberate — keys arrive via env var
@@ -173,7 +244,7 @@ def get_business_profile() -> dict:
         "product": "",
         "target_customers": "",
         "value_proposition": "",
-        "sender_name": cfg.get("sender_name", "The Team"),
+        "sender_name": cfg.get("sender_name", "Autodesk Educational Solutions"),
     })
 
 def set_business_profile(profile: dict):
@@ -251,7 +322,7 @@ OVERPASS_URLS = [
 # Overpass fails over to Google Maps via that provider instead.
 
 def get_apify_token() -> str:
-    return load_config().get("apify_token", "")
+    return os.environ.get("APIFY_TOKEN", "").strip() or load_config().get("apify_token", "")
 
 def set_apify_token(token: str):
     cfg = load_config()
@@ -259,7 +330,7 @@ def set_apify_token(token: str):
     save_config(cfg)
 
 def get_outscraper_key() -> str:
-    return load_config().get("outscraper_key", "")
+    return os.environ.get("OUTSCRAPER_KEY", "").strip() or load_config().get("outscraper_key", "")
 
 def set_outscraper_key(key: str):
     cfg = load_config()
@@ -267,7 +338,7 @@ def set_outscraper_key(key: str):
     save_config(cfg)
 
 def get_apollo_key() -> str:
-    return load_config().get("apollo_key", "")
+    return os.environ.get("APOLLO_KEY", "").strip() or load_config().get("apollo_key", "")
 
 def set_apollo_key(key: str):
     cfg = load_config()
@@ -294,3 +365,8 @@ def load_session_data(session_id: str, filename: str) -> dict:
     if path.exists():
         return json.loads(path.read_text(encoding="utf-8"))
     return {}
+
+# ── Safety / Dry Run ──────────────────────────────────────────────────
+def is_dry_run() -> bool:
+    """True if DRY_RUN env var is set (1, true, yes, on). Prevents real email sending and paid API calls."""
+    return os.environ.get("DRY_RUN", "").strip().lower() in ("1", "true", "yes", "on")

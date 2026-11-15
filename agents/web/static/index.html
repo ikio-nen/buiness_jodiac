@@ -8,16 +8,93 @@
   <meta name="color-scheme" content="light">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=VT323&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css?v=44">
+  <!-- Boldonse speaks, Figtree reads, Fragment Mono counts, Silkscreen labels the floor. -->
+  <link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;1,6..96,400&family=Figtree:wght@400;500;600;700;800&family=Fragment+Mono&family=Silkscreen:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+  <link rel="stylesheet" href="/static/style.css?v=79">
+  <!-- Gnosis skin: overrides only. Remove these two lines to return to the
+       warm pixel theme exactly as it is. -->
+  <link rel="stylesheet" href="/static/gp.css?v=8">
+  <script type="module" src="/static/js/gp.js?v=1"></script>
+  <script type="module" src="/static/js/pixel-floor.js?v=3"></script>
+  <script type="module" src="/static/js/map.js?v=5"></script>
 </head>
 <body>
+  <!-- ── Loading screen (gnosispay card-stack shuffle) ─────────── -->
+  <div class="boot" id="boot">
+    <div class="boot-stage" aria-hidden="true">
+      <div class="boot-card">
+        <div class="boot-card-top"><span class="boot-dot"></span><span class="boot-name">SCOUT</span></div>
+        <div class="boot-role">finds and vets businesses</div>
+        <div class="boot-card-bot"><span class="boot-line w70"></span><span class="boot-line w45"></span></div>
+      </div>
+      <div class="boot-card">
+        <div class="boot-card-top"><span class="boot-dot"></span><span class="boot-name">ANALYST</span></div>
+        <div class="boot-role">scores every lead</div>
+        <div class="boot-card-bot"><span class="boot-line w45"></span><span class="boot-line w70"></span></div>
+      </div>
+      <div class="boot-card">
+        <div class="boot-card-top"><span class="boot-dot"></span><span class="boot-name">STRATEGIST</span></div>
+        <div class="boot-role">turns intel into drafts</div>
+        <div class="boot-card-bot"><span class="boot-line w70"></span><span class="boot-line w45"></span></div>
+      </div>
+    </div>
+    <div class="boot-word">J.A.R.V.I.S</div>
+    <div class="boot-bar"><i></i></div>
+    <div class="boot-note">bringing the office online</div>
+  </div>
+
+  <!-- ── Locations panel: map · pins · run ────────────────────── -->
+  <aside class="side-panel" id="sidePanel" hidden aria-label="Locations">
+    <header class="side-head">
+      <b>LOCATIONS</b>
+      <button class="side-x" id="sideClose" type="button" aria-label="Close panel">×</button>
+    </header>
+    <div class="side-body">
+      <section class="side-sec">
+        <div class="map-wrap" id="mapWrap">
+          <div class="map-tiles" id="mapTiles"></div>
+          <div class="map-pins" id="mapPins"></div>
+          <div class="map-zoom">
+            <button type="button" data-zoom="1" aria-label="Zoom in">+</button>
+            <button type="button" data-zoom="-1" aria-label="Zoom out">−</button>
+          </div>
+        </div>
+        <div class="map-foot">
+          <span class="map-hint">click to drop a pin · drag to pan</span>
+          <a class="map-attrib" href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a>
+        </div>
+      </section>
+
+      <section class="side-sec">
+        <h4>PINS<button class="sec-act" id="mapClear" type="button">clear</button></h4>
+        <div class="pin-list" id="pinList"></div>
+      </section>
+
+      <section class="side-sec">
+        <h4>RUN</h4>
+        <label class="fld"><span>search for</span>
+          <input id="mapQuery" type="text" value="CAD training institutes, not colleges or schools">
+        </label>
+        <label class="chk"><input type="checkbox" id="mapGrow" checked> grow the circle each round</label>
+        <div class="fld-3">
+          <label class="fld"><span>start km</span><input id="mapBaseKm" type="number" value="2.5" step="0.5" min="0.5"></label>
+          <label class="fld"><span>target</span><input id="mapTarget" type="number" value="10" min="1"></label>
+          <label class="fld"><span>rounds</span><input id="mapRounds" type="number" value="4" min="1" max="8"></label>
+        </div>
+        <button class="btn-run" id="mapRun" type="button">Run pins</button>
+        <div class="map-log" id="mapLog" aria-live="polite"></div>
+      </section>
+    </div>
+  </aside>
+
   <div class="app">
 
     <!-- ── Top bar ─────────────────────────────────────────────── -->
     <header class="topbar">
       <div class="topbar-left">
         <span class="logo-chip">J.A.R.V.I.S</span>
+        <!-- DRY_RUN_BADGE -->
         <span class="topbar-note" id="sessionInfo"></span>
         <span class="clock-chip" id="clockChip" title="Office time — the room dims with the real clock">
           <i class="clock-icon" id="clockIcon">☀</i>
@@ -25,15 +102,25 @@
         </span>
       </div>
       <div class="topbar-right">
-        <button class="goal-chip" id="goalChip" title="What JARVIS is selling right now — click to change" aria-label="Selling goal" aria-haspopup="true" aria-expanded="false">
-          <i class="goal-dot" aria-hidden="true"></i>
-          <span id="goalChipText">Goal: auto</span>
-        </button>
         <span class="conn" id="connChip"><i class="conn-dot" id="statusDot" aria-hidden="true"></i><span id="statusText">connecting…</span></span>
-        <button class="icon-btn" id="musicBtn" title="Music corner — lo-fi for the office" aria-label="Music corner">♪</button>
-        <button class="icon-btn" id="historyBtn" title="Conversation history" aria-label="Conversation history">▤</button>
-        <button class="icon-btn" id="vaultBtn" title="Key vault — your API keys, code-locked" aria-label="Key vault">🔑</button>
-        <button class="icon-btn" id="statusBtn" title="System status" aria-label="System status">◉</button>
+        <!-- One labelled menu holds every secondary panel. Each item keeps the
+             id the existing JS binds to; the menu itself is a native <details>
+             so it is keyboard-operable without a JS toggle. -->
+        <details class="topbar-menu" id="topMenu">
+          <summary class="menu-btn" aria-label="Open tools menu">☰ <span>menu</span></summary>
+          <div class="menu-list">
+            <button class="menu-item" id="goalChip" title="What JARVIS is selling right now — click to change" aria-label="Selling goal" aria-haspopup="true" aria-expanded="false">
+              <i class="goal-dot" aria-hidden="true"></i>
+              <span id="goalChipText">Goal: auto</span>
+              <em>selling goal</em>
+            </button>
+            <button class="menu-item" id="mapBtn" title="Pick places on a map and run each one" aria-label="Locations map" aria-expanded="false">🗺 <span>locations</span><em>map</em></button>
+            <button class="menu-item" id="musicBtn" title="Music corner — lo-fi for the office" aria-label="Music corner">♪ <span>music corner</span><em>lo-fi</em></button>
+            <button class="menu-item" id="historyBtn" title="Conversation history" aria-label="Conversation history">▤ <span>conversations</span><em>history</em></button>
+            <button class="menu-item" id="vaultBtn" title="Key vault — your API keys, code-locked" aria-label="Key vault">🔑 <span>key vault</span><em>locked</em></button>
+            <button class="menu-item" id="statusBtn" title="System status" aria-label="System status">◉ <span>system status</span><em>health</em></button>
+          </div>
+        </details>
       </div>
     </header>
 
@@ -46,43 +133,43 @@
         <!-- furniture zones (stations) -->
         <div class="station station-scout" id="station-scout" title="Scout: finds and vets businesses">
           <div class="fur fur-desk"><span class="desk"></span><span class="mon"><i></i></span><span class="chair"></span></div>
-          <div class="zone-label">SCOUT</div>
+          <div class="zone-label">SCOUT<b class="zone-count" aria-label="agents at this desk">0</b></div>
         </div>
         <div class="station station-analyst" id="station-analyst" title="Analyst: numbers and debriefs">
           <div class="fur fur-desk"><span class="desk"></span><span class="mon"><i></i></span><span class="chair"></span></div>
-          <div class="zone-label">ANALYST</div>
+          <div class="zone-label">ANALYST<b class="zone-count" aria-label="agents at this desk">0</b></div>
         </div>
         <div class="station station-scraper" id="station-scraper" title="Scraper: reads business websites">
           <div class="fur fur-desk"><span class="desk"></span><span class="mon"><i></i></span><span class="chair"></span></div>
-          <div class="zone-label">SCRAPER</div>
+          <div class="zone-label">SCRAPER<b class="zone-count" aria-label="agents at this desk">0</b></div>
         </div>
         <div class="station station-enricher" id="station-enricher" title="Enricher: hunts contact info">
           <div class="fur fur-desk"><span class="desk"></span><span class="mon"><i></i></span><span class="chair"></span></div>
-          <div class="zone-label">ENRICHER</div>
+          <div class="zone-label">ENRICHER<b class="zone-count" aria-label="agents at this desk">0</b></div>
         </div>
         <div class="station station-builder" id="station-builder" title="Builder: makes demo websites + PDFs">
           <div class="fur fur-desk"><span class="desk"></span><span class="mon"><i></i></span><span class="chair"></span></div>
-          <div class="zone-label">BUILDER</div>
+          <div class="zone-label">BUILDER<b class="zone-count" aria-label="agents at this desk">0</b></div>
         </div>
         <div class="station station-mailer" id="station-mailer" title="Mailer: sends the emails">
           <div class="fur fur-desk"><span class="desk"></span><span class="mon"><i></i></span><span class="chair"></span></div>
-          <div class="zone-label">MAILER</div>
+          <div class="zone-label">MAILER<b class="zone-count" aria-label="agents at this desk">0</b></div>
         </div>
         <div class="station station-strategist" id="station-strategist" title="Strategist: turns intel into angles and drafts">
           <div class="fur fur-table"><span class="table"></span><span class="paper p1"></span><span class="paper p2"></span></div>
-          <div class="zone-label">STRATEGIST</div>
+          <div class="zone-label">STRATEGIST<b class="zone-count" aria-label="agents at this desk">0</b></div>
         </div>
         <div class="station station-drafts" id="station-drafts" title="Draft queue: emails awaiting your review">
           <div class="fur fur-meeting"><span class="mtable"></span><span class="paper p1"></span><span class="paper p2"></span><span class="paper p3"></span></div>
-          <div class="zone-label">DRAFTS</div>
+          <div class="zone-label">DRAFTS<b class="zone-count" aria-label="agents at this desk">0</b></div>
         </div>
         <div class="station station-sent" id="station-sent" title="Sent: emails that went out">
           <div class="fur fur-tray"><span class="tray t1"></span><span class="tray t2"></span></div>
-          <div class="zone-label">SENT</div>
+          <div class="zone-label">SENT<b class="zone-count" aria-label="agents at this desk">0</b></div>
         </div>
         <div class="station station-brain" id="station-brain" title="The brain: everything we learn is stored here">
           <div class="fur fur-rack"><span class="rack-unit"><i></i><i></i><i></i></span></div>
-          <div class="zone-label">BRAIN</div>
+          <div class="zone-label">BRAIN<b class="zone-count" aria-label="agents at this desk">0</b></div>
         </div>
 
         <!-- decor -->
@@ -127,18 +214,37 @@
         <button class="tab" data-tab="skills" role="tab" aria-selected="false">📚 skills</button>
       </nav>
 
-      <div class="cmd-stats" id="opsStats">—</div>
+      <div class="metric-row" id="opsStats">
+        <div class="metric-card"><b id="metricMem">—</b><span>memories</span></div>
+        <div class="metric-card"><b id="metricBiz">—</b><span>businesses</span></div>
+        <div class="metric-card"><b id="metricFacts">—</b><span>team facts</span></div>
+      </div>
 
       <!-- CHAT TAB -->
       <div class="tabpane is-active" data-pane="chat">
+        <div class="chat-empty" id="chatEmpty">
+          <div class="chat-empty-title">What are we <em>working</em> on?</div>
+          <div class="chat-empty-sub">Ask anything, or type / for commands.</div>
+          <div class="chat-empty-grid">
+            <button class="empty-card" type="button" data-empty="/search">
+              <span class="empty-ico">🔍</span>
+              <span><b>Find training institutes</b><span>CADD centres near a town</span></span>
+            </button>
+            <button class="empty-card" type="button" data-empty="/brainstorm">
+              <span class="empty-ico">💡</span>
+              <span><b>Brainstorm an angle</b><span>think out loud with the team</span></span>
+            </button>
+            <button class="empty-card" type="button" data-empty="/draft">
+              <span class="empty-ico">✏️</span>
+              <span><b>Draft the emails</b><span>for the leads already found</span></span>
+            </button>
+          </div>
+        </div>
         <main class="messages" id="messages" role="log" aria-live="polite"></main>
         <div class="quick-chips" id="quickActions">
           <button class="chip" data-action="search">🔍 search</button>
           <button class="chip" data-action="draft">✏️ draft</button>
           <button class="chip" data-action="research">📖 research</button>
-          <button class="chip" data-action="send">📤 send</button>
-          <button class="chip" data-action="status">📊 status</button>
-          <button class="chip" data-action="dashboard">🗂 dashboard</button>
         </div>
         <div class="composer">
           <div class="activity-strip" id="activityStrip" aria-live="polite">office idle — run a search or “team act”</div>
@@ -158,6 +264,14 @@
           <div class="composer-foot">
             <span class="composer-hint">enter to send · ↑↓ history · shift+tab mode · “ask scout …”</span>
             <span class="composer-meta">
+              <details class="chips-more" id="chipsMore">
+                <summary class="chip chip-more" title="More actions">＋<span> more</span></summary>
+                <div class="chips-more-list">
+                  <button class="chip" data-action="send">📤 send</button>
+                  <button class="chip" data-action="status">📊 status</button>
+                  <button class="chip" data-action="dashboard">🗂 dashboard</button>
+                </div>
+              </details>
               <span class="ctx-chip" id="ctxChip" title="Estimated tokens in this conversation">ctx 0</span>
               <button class="mode-chip" id="modeBtn" type="button" aria-pressed="false"
                       title="When on, JARVIS runs sending and delivery actions without asking first">ask first</button>
@@ -213,6 +327,12 @@
 
     <!-- ── Bottom: team roster strip ───────────────────────────── -->
     <footer class="roster-strip">
+      <div class="roster-counters" id="officeCounters"
+           title="Office activity this session — who started, finished, or failed">
+        <span class="oc oc-active oc-zero"><i>▸</i> on it <b id="ocActive">0</b></span>
+        <span class="oc oc-done oc-zero"><i>✔</i> done <b id="ocDone">0</b></span>
+        <span class="oc oc-err oc-zero"><i>✖</i> err <b id="ocErr">0</b></span>
+      </div>
       <div class="roster-scroller" id="opsRoster"></div>
       <button class="add-skill-btn" id="teachBtn" title="Teach the team a new skill">＋<br>skill</button>
     </footer>
@@ -281,8 +401,8 @@
     <div class="status-content vault-body" id="vaultBody" aria-live="polite">Locked.</div>
   </div>
 
-  <script type="module" src="/static/app.js?v=44"></script>
-  <script type="module" src="/static/js/campaign.js?v=44"></script>
-  <script type="module" src="/static/js/vault.js?v=44"></script>
+  <script type="module" src="/static/app.js?v=79"></script>
+  <script type="module" src="/static/js/campaign.js?v=79"></script>
+  <script type="module" src="/static/js/vault.js?v=79"></script>
 </body>
 </html>

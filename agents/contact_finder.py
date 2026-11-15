@@ -260,8 +260,13 @@ def _fetch(url: str, timeout: int = 8):
     is computed and the fetch retried with it, no headless browser needed.
     """
     page = None
+    # The URL comes from a scraped page or a model, so it is untrusted: the
+    # guard refuses loopback, LAN and metadata targets before the request, and
+    # the redirect count is capped so one hop cannot undo the check.
     try:
-        page = Fetcher.get(url, timeout=timeout)
+        from .url_guard import MAX_REDIRECTS, safe_url
+        url = safe_url(url)
+        page = Fetcher.get(url, timeout=timeout, max_redirects=MAX_REDIRECTS)
     except Exception:
         return None
     html = (getattr(page, "html_content", "") or "") if page is not None else ""
@@ -272,9 +277,7 @@ def _fetch(url: str, timeout: int = 8):
             from urllib.parse import urlsplit
             host = urlsplit(url).netloc
             try:
-                Fetcher.get(url, timeout=timeout,
-                            headers={"Cookie": f"{solved[0]}={solved[1]}"})
-                page = Fetcher.get(url, timeout=timeout,
+                page = Fetcher.get(url, timeout=timeout, max_redirects=MAX_REDIRECTS,
                                    headers={"Cookie": f"{solved[0]}={solved[1]}"})
             except Exception:
                 pass

@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>J.A.R.V.I.S — Crimson / Gold / Bone — design preview</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;1,6..96,400&family=Boldonse&family=Figtree:wght@300;400;500;600;700&family=Fragment+Mono&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --black:        #0b0708;
+    --black-soft:   #120a0d;
+    --crimson-deep: #24070f;
+    --crimson:      #521020;
+    --crimson-lit:  #8e1730;
+    --blood:        #c2183c;
+    --gold:         #c8a15a;
+    --gold-lit:     #e8cb8e;
+    --bone:         #f4ebdb;
+    --bone-dim:     #b9a892;
+    --hair:         rgba(200, 161, 90, .24);
+    --hair-soft:    rgba(244, 235, 219, .10);
+    --display: 'Bodoni Moda', Georgia, serif;
+    --body: 'Figtree', system-ui, sans-serif;
+    --mono: 'Fragment Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; border-radius: 0; }
+  html, body { margin: 0; background: var(--black); color: var(--bone); font-family: var(--body); }
+  body {
+    background:
+      radial-gradient(90% 55% at 50% -8%, rgba(194, 24, 60, .30), transparent 62%),
+      radial-gradient(60% 40% at 85% 8%, rgba(200, 161, 90, .10), transparent 60%),
+      var(--black);
+    padding-bottom: 80px;
+  }
+  /* faint engraved grid, the "art" layer */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background-image:
+      repeating-linear-gradient(0deg, rgba(244, 235, 219, .028) 0 1px, transparent 1px 44px),
+      repeating-linear-gradient(90deg, rgba(244, 235, 219, .028) 0 1px, transparent 1px 44px);
+    mask-image: radial-gradient(120% 80% at 50% 0%, #000 0%, transparent 78%);
+  }
+  .wrap { position: relative; z-index: 1; max-width: 1080px; margin: 0 auto; padding: 0 28px; }
+
+  /* ── top bar ─────────────────────────────────────────── */
+  .top {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 18px 0 14px;
+    border-bottom: 1px solid var(--hair);
+  }
+  .mark { font-family: var(--display); font-size: 19px; letter-spacing: .14em; }
+  .mark i { color: var(--gold); font-style: normal; }
+  .top nav { display: flex; gap: 20px; font-family: var(--mono); font-size: 10.5px; letter-spacing: .16em; color: var(--bone-dim); text-transform: uppercase; }
+  .top nav b { color: var(--gold); font-weight: 400; }
+
+  /* ── hero ────────────────────────────────────────────── */
+  .hero { padding: 76px 0 54px; }
+  .kicker {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .3em;
+    text-transform: uppercase; color: var(--gold); margin-bottom: 22px;
+  }
+  h1 {
+    font-family: var(--display); font-weight: 400; font-size: clamp(44px, 7.4vw, 92px);
+    line-height: .96; letter-spacing: -.02em; margin: 0 0 6px;
+  }
+  h1 em { font-style: italic; color: var(--gold); }
+  .rule {
+    display: flex; align-items: center; gap: 12px; margin: 30px 0 22px;
+  }
+  .rule span { height: 1px; background: linear-gradient(90deg, var(--gold), rgba(200,161,90,0)); flex: 1; }
+  .rule i {
+    width: 7px; height: 7px; background: var(--gold); transform: rotate(45deg); display: block;
+  }
+  .lede { max-width: 560px; font-size: 15px; line-height: 1.72; color: var(--bone-dim); font-weight: 300; }
+  .lede b { color: var(--bone); font-weight: 500; }
+
+  /* ── section heads ───────────────────────────────────── */
+  .sec { padding: 46px 0 10px; }
+  .sec h2 {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .26em;
+    text-transform: uppercase; color: var(--gold); font-weight: 400;
+    display: flex; align-items: center; gap: 14px; margin: 0 0 22px;
+  }
+  .sec h2::after { content: ''; height: 1px; flex: 1; background: var(--hair); }
+
+  /* ── palette ─────────────────────────────────────────── */
+  .swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 1px; background: var(--hair); border: 1px solid var(--hair); }
+  .sw { padding: 0; background: var(--black); }
+  .sw i { display: block; height: 92px; }
+  .sw div { padding: 10px 11px; }
+  .sw b { display: block; font-family: var(--mono); font-size: 10px; letter-spacing: .08em; color: var(--bone); font-weight: 400; }
+  .sw span { display: block; font-family: var(--mono); font-size: 9.5px; color: var(--bone-dim); margin-top: 3px; }
+
+  /* ── type ────────────────────────────────────────────── */
+  .type { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 22px; }
+  .type-card { border: 1px solid var(--hair); padding: 20px; background: rgba(36, 7, 15, .35); }
+  .type-card h3 { font-family: var(--mono); font-size: 9.5px; letter-spacing: .2em; text-transform: uppercase; color: var(--gold); font-weight: 400; margin: 0 0 14px; }
+  .spec-display { font-family: var(--display); font-size: 40px; line-height: 1.02; letter-spacing: -.01em; }
+  .spec-display em { color: var(--gold); font-style: italic; }
+  .spec-body { font-size: 14px; line-height: 1.75; color: var(--bone-dim); font-weight: 300; }
+  .spec-body b { color: var(--bone); font-weight: 600; }
+  .spec-mono { font-family: var(--mono); font-size: 11.5px; line-height: 1.9; color: var(--bone-dim); }
+  .spec-mono b { color: var(--gold); font-weight: 400; }
+
+  /* ── chat mock ───────────────────────────────────────── */
+  .chat { border: 1px solid var(--hair); background: linear-gradient(180deg, #150a0e, #0d0709); padding: 20px; }
+  .chat-head { display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--hair-soft); padding-bottom: 12px; margin-bottom: 18px; }
+  .chat-head b { font-family: var(--display); font-size: 15px; letter-spacing: .06em; }
+  .tabs { display: flex; gap: 2px; }
+  .tab { font-family: var(--body); font-size: 11.5px; font-weight: 600; padding: 6px 12px; color: var(--bone-dim); border: 1px solid transparent; }
+  .tab.on { background: var(--gold); color: #180a0e; border-color: var(--gold); }
+  .msg { margin-bottom: 16px; }
+  .by { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--bone-dim); margin-bottom: 6px; }
+  .by::before { content: ''; width: 5px; height: 5px; background: var(--gold); display: block; }
+  .by.mine { justify-content: flex-end; }
+  .by.mine::before { background: var(--blood); order: 2; }
+  .bub {
+    border: 1px solid var(--hair); background: rgba(244, 235, 219, .035);
+    padding: 13px 15px; font-size: 13.5px; line-height: 1.68; max-width: 86%;
+    border-left: 2px solid var(--gold);
+  }
+  .bub p { margin: 0 0 8px; }
+  .bub p:last-child { margin: 0; }
+  .bub small { color: var(--bone-dim); font-family: var(--mono); font-size: 11px; }
+  .mine-bub {
+    margin-left: auto; background: var(--gold); color: #180a0e; border: none;
+    font-weight: 500; padding: 12px 15px; font-size: 13.5px; max-width: 70%;
+  }
+  .composer { display: flex; align-items: center; gap: 10px; margin-top: 18px; border: 1px solid var(--hair); padding: 8px 10px; background: rgba(11, 7, 8, .6); }
+  .composer span { font-family: var(--mono); color: var(--gold); font-size: 13px; }
+  .composer p { flex: 1; margin: 0; font-size: 13px; color: var(--bone-dim); }
+  .send { width: 34px; height: 34px; background: var(--blood); color: var(--bone); display: grid; place-items: center; font-size: 14px; }
+
+  /* ── panel mock ──────────────────────────────────────── */
+  .panelrow { display: grid; grid-template-columns: 372px 1fr; gap: 22px; align-items: start; }
+  .panel { border: 1px solid var(--hair); background: #0d0709; }
+  .phead { display: flex; justify-content: space-between; align-items: center; padding: 13px 16px; border-bottom: 1px solid var(--hair); }
+  .phead b { font-family: var(--display); font-size: 12px; letter-spacing: .16em; }
+  .phead i { font-style: normal; font-family: var(--mono); color: var(--bone-dim); font-size: 14px; }
+  .pbody { padding: 14px 16px 18px; }
+  .fake-map {
+    position: relative; height: 190px; border: 1px solid var(--hair); overflow: hidden;
+    background:
+      radial-gradient(60% 60% at 30% 35%, rgba(194, 24, 60, .22), transparent 70%),
+      repeating-linear-gradient(0deg, rgba(200, 161, 90, .10) 0 1px, transparent 1px 26px),
+      repeating-linear-gradient(90deg, rgba(200, 161, 90, .10) 0 1px, transparent 1px 26px),
+      #160a0d;
+  }
+  .fake-map::after {
+    content: ''; position: absolute; left: 18%; top: 20%; width: 52%; height: 58%;
+    border: 1px dashed rgba(200, 161, 90, .5); border-radius: 50%;
+    background: rgba(200, 161, 90, .05);
+  }
+  .pin { position: absolute; left: 44%; top: 49%; width: 11px; height: 11px; background: var(--gold); border: 2px solid #0b0708; }
+  .pin span {
+    position: absolute; top: 15px; left: 50%; transform: translateX(-50%);
+    font-family: var(--mono); font-size: 9.5px; background: #0b0708; border: 1px solid var(--hair);
+    padding: 2px 5px; white-space: nowrap; color: var(--bone);
+  }
+  .ph { font-family: var(--mono); font-size: 9.5px; letter-spacing: .18em; text-transform: uppercase; color: var(--gold); margin: 16px 0 8px; display: flex; justify-content: space-between; }
+  .row { display: grid; grid-template-columns: 1fr 22px; gap: 4px 6px; border: 1px solid var(--hair); padding: 7px 9px; background: rgba(244, 235, 219, .03); }
+  .row b { font-size: 12px; font-weight: 600; }
+  .row i { font-style: normal; color: var(--bone-dim); font-size: 13px; line-height: 1; }
+  .row small { grid-column: 1 / -1; font-family: var(--mono); font-size: 9.5px; color: var(--bone-dim); }
+  .fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin: 10px 0; }
+  .f { display: grid; gap: 4px; }
+  .f em { font-style: normal; font-family: var(--mono); font-size: 9px; letter-spacing: .12em; text-transform: uppercase; color: var(--bone-dim); }
+  .f div { border: 1px solid var(--hair); padding: 6px 8px; font-family: var(--mono); font-size: 11px; }
+  .run { width: 100%; padding: 10px; background: var(--blood); color: var(--bone); border: none; font-family: var(--body); font-weight: 700; font-size: 12px; letter-spacing: .02em; }
+  .log { margin-top: 9px; border: 1px solid var(--hair); padding: 7px 9px; font-family: var(--mono); font-size: 9.5px; color: var(--bone-dim); line-height: 1.8; }
+
+  .notice { border: 1px solid var(--hair); padding: 18px 20px; background: rgba(36, 7, 15, .4); }
+  .notice p { margin: 0 0 8px; font-size: 12.5px; line-height: 1.7; color: var(--bone-dim); }
+  .notice p:last-child { margin: 0; }
+  .notice b { color: var(--gold); font-weight: 400; font-family: var(--mono); font-size: 11px; }
+
+  .alt { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 14px; }
+  .alt div { border: 1px solid var(--hair); padding: 14px 16px; flex: 1 1 220px; }
+  .alt h4 { margin: 0 0 8px; font-family: var(--mono); font-size: 9px; letter-spacing: .18em; text-transform: uppercase; color: var(--bone-dim); font-weight: 400; }
+  .alt p { margin: 0; font-size: 24px; line-height: 1.1; }
+  .alt .a1 { font-family: 'Boldonse', sans-serif; font-size: 19px; }
+  .alt .a2 { font-family: var(--display); font-style: italic; }
+  .alt .a3 { font-family: var(--body); font-weight: 300; letter-spacing: .02em; }
+
+  footer { margin-top: 60px; border-top: 1px solid var(--hair); padding-top: 18px; font-family: var(--mono); font-size: 10px; letter-spacing: .12em; color: rgba(185, 168, 146, .7); display: flex; justify-content: space-between; }
+
+  @media (max-width: 860px) {
+    .swatches { grid-template-columns: repeat(3, 1fr); }
+    .type, .panelrow { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div class="mark">J.A.R.V.I.<i>S</i></div>
+    <nav><span>crimson</span><span>gold</span><span><b>bone</b></span><span>square</span></nav>
+  </div>
+
+  <section class="hero">
+    <div class="kicker">Design preview — not yet applied</div>
+    <h1>The office,<br>drawn in <em>crimson</em>.</h1>
+    <div class="rule"><i></i><span></span></div>
+    <p class="lede">Oxblood ground, <b>gold hairlines</b>, bone text. High-contrast Bodoni for the
+      wordmark and headings, Figtree for anything you have to read for longer than a second,
+      Fragment Mono for session ids, timings and money. Every corner square, one border weight,
+      no glow — the drama comes from the <b>type and the crimson</b>, not from effects.</p>
+  </section>
+
+  <section class="sec">
+    <h2>Palette</h2>
+    <div class="swatches">
+      <div class="sw"><i style="background:#0b0708"></i><div><b>BLACK</b><span>#0B0708</span></div></div>
+      <div class="sw"><i style="background:#24070f"></i><div><b>OXBLOOD</b><span>#24070F</span></div></div>
+      <div class="sw"><i style="background:#521020"></i><div><b>CRIMSON</b><span>#521020</span></div></div>
+      <div class="sw"><i style="background:#c2183c"></i><div><b>BLOOD</b><span>#C2183C</span></div></div>
+      <div class="sw"><i style="background:#c8a15a"></i><div><b>GOLD</b><span>#C8A15A</span></div></div>
+      <div class="sw"><i style="background:#f4ebdb"></i><div><b>BONE</b><span>#F4EBDB</span></div></div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>Type</h2>
+    <div class="type">
+      <div class="type-card">
+        <h3>Display — Bodoni Moda</h3>
+        <div class="spec-display">Ascent<br><em>Infotech</em><br>CAD Institute</div>
+      </div>
+      <div class="type-card">
+        <h3>Body — Figtree</h3>
+        <p class="spec-body">24 leads reachable. <b>CADD Centre Salt Lake</b> has no site, which is
+          the gap this pitch sells against. Timings, ids and numbers sit in mono so they line up:</p>
+        <p class="spec-body"><b>13</b> direct fits · <b>24</b> plausible · <b>66</b> ruled out</p>
+      </div>
+      <div class="type-card">
+        <h3>Mono — Fragment Mono</h3>
+        <div class="spec-mono">
+          <b>session</b> 20261111_230957<br>
+          <b>radius</b> 3.0 km → 4.2 km<br>
+          <b>kept</b> 24 · <b>new</b> 24<br>
+          <b>email</b> ins.cad@gmail.com
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" id="chat">
+    <h2>Chat</h2>
+    <div class="chat">
+      <div class="chat-head">
+        <b>J.A.R.V.I.S</b>
+        <div class="tabs">
+          <div class="tab on">chat</div><div class="tab">agents</div><div class="tab">skills</div>
+        </div>
+      </div>
+      <div class="msg">
+        <div class="by">jarvis · 09:27</div>
+        <div class="bub">
+          <p>Serampore is done — 24 kept, 23 of them private training centres.</p>
+          <p><small>CADD Centre · Ascent Infotech CAD Training Institute · AutoCAD Training Centre</small></p>
+        </div>
+      </div>
+      <div class="msg">
+        <div class="by mine">you · 09:28</div>
+        <div class="mine-bub">draft for the three with no website</div>
+      </div>
+      <div class="msg">
+        <div class="by">jarvis · 09:28</div>
+        <div class="bub">
+          <p>Three drafts ready. Each one names the course they run and the seat count they need —
+            no generic pitch.</p>
+          <p><small>review · edit · send</small></p>
+        </div>
+      </div>
+      <div class="composer"><span>&gt;</span><p>Message JARVIS…</p><div class="send">➤</div></div>
+    </div>
+  </section>
+
+  <section class="sec" id="panel">
+    <h2>Locations panel</h2>
+    <div class="panelrow">
+      <div class="panel">
+        <div class="phead"><b>LOCATIONS</b><i>×</i></div>
+        <div class="pbody">
+          <div class="fake-map">
+            <div class="pin"><span>Simla</span></div>
+          </div>
+          <div class="ph"><span>Pins</span><span>clear</span></div>
+          <div class="row">
+            <b>Simla</b><i>×</i>
+            <small>4.2 km · 24 new · 24 leads</small>
+          </div>
+          <div class="ph"><span>Run</span></div>
+          <div class="fields">
+            <div class="f"><em>start km</em><div>3.0</div></div>
+            <div class="f"><em>target</em><div>10</div></div>
+            <div class="f"><em>rounds</em><div>4</div></div>
+          </div>
+          <button class="run">Run pins</button>
+          <div class="log">Simla · round 1 · 3.0 km<br>kept 24 · new 24 · total 24</div>
+        </div>
+      </div>
+      <div class="notice">
+        <p><b>WHY THIS WORKS</b></p>
+        <p>Gold only ever marks what is <b>live or actionable</b> — the active tab, the pin,
+          a fit score, the section rules. Crimson is the ground and the blood accent; it never
+          carries body text, so nothing smears together at 13px.</p>
+        <p>Bone is the reading colour everywhere, which keeps the contrast above 12:1 on
+          oxblood. Square corners and 1px hairlines replace the old pill shapes, so the
+          interface reads as engraved rather than bubbly.</p>
+        <p><b>ROLLBACK</b> — this sits in <b>gp.css</b> only. One link tag to remove.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2>If you want a different voice</h2>
+    <div class="alt">
+      <div><h4>Option A · current pick</h4><p class="a2">Bodoni Moda</p></div>
+      <div><h4>Option B · gnosispay's own</h4><p class="a1">Boldonse</p></div>
+      <div><h4>Option C · quieter</h4><p class="a3">Figtree Light</p></div>
+    </div>
+  </section>
+
+  <footer>
+    <span>PREVIEW · CRIMSON / GOLD / BONE</span>
+    <span>NOT APPLIED TO THE APP</span>
+  </footer>
+</div>
+</body>
+</html>

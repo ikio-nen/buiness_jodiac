@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" width="32" height="32" shape-rendering="crispEdges">
+  <!-- Retro pixel art J.A.R.V.I.S bot head -->
+  <!-- Antenna -->
+  <rect x="7" y="1" width="2" height="2" fill="#e0954f"/>
+  <rect x="6" y="0" width="4" height="1" fill="#c0504d"/>
+  <!-- Head outer border -->
+  <rect x="3" y="3" width="10" height="9" fill="#3d3529"/>
+  <!-- Head faceplate -->
+  <rect x="4" y="4" width="8" height="7" fill="#fbf6ea"/>
+  <!-- Eyes -->
+  <rect x="5" y="6" width="2" height="2" fill="#6f9e58"/>
+  <rect x="9" y="6" width="2" height="2" fill="#6f9e58"/>
+  <!-- Cheeks / blush -->
+  <rect x="4" y="8" width="1" height="1" fill="#e0954f"/>
+  <rect x="11" y="8" width="1" height="1" fill="#e0954f"/>
+  <!-- Mouth / speaker slot -->
+  <rect x="6" y="9" width="4" height="1" fill="#3d3529"/>
+  <!-- Neck -->
+  <rect x="6" y="12" width="4" height="1" fill="#857a63"/>
+  <!-- Collar / shoulders -->
+  <rect x="4" y="13" width="8" height="2" fill="#e0954f"/>
+  <rect x="2" y="14" width="2" height="1" fill="#c0504d"/>
+  <rect x="12" y="14" width="2" height="1" fill="#c0504d"/>
+</svg>
+

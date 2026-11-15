@@ -48,6 +48,9 @@ def find_executives(businesses: list[dict], max_seconds: float = 90.0) -> dict:
     exec_title, exec_source}]}. Never raises.
     """
     out = {"searched": 0, "found": 0, "results": []}
+    from .config import is_dry_run
+    if is_dry_run():
+        return {"searched": len(businesses), "found": len(businesses), "results": businesses, "dry_run": True}
     try:
         hunter_key = get_hunter_key()
         apollo_key = get_apollo_key()

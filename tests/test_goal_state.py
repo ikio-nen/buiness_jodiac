@@ -116,9 +116,21 @@ def main() -> int:
 
         # A search must never be eaten by the goal fastpath — and brainstorm
         # triggers ("my product") must not shadow a real statement.
-        a = parse_intent("find autocad training institutes in kolkata remove schools colleges auditoriums and libraries")
-        check("search phrasing stays a SEARCH",
-              a.type == ActionType.SEARCH, f"got {a.type.value}")
+        # Mock ai_engine + ai.converse so intent parsing evaluates strictly
+        # without requiring a live Gemini API key or network access.
+        from unittest.mock import patch
+        from agents.ai.schemas import ToolTurn, ToolCall
+        mock_turn = ToolTurn(
+            calls=[ToolCall(name="search_businesses", args={"query": "autocad training institutes in kolkata", "category": "training institute", "location": "kolkata"})],
+            text="",
+            error="",
+            round_count=1
+        )
+        with patch("agents.ai_engine.is_available", return_value=True), \
+             patch("agents.ai.service.service.converse", return_value=mock_turn):
+            a = parse_intent("find autocad training institutes in kolkata remove schools colleges auditoriums and libraries")
+            check("search phrasing stays a SEARCH",
+                  a.type == ActionType.SEARCH, f"got {a.type.value}")
 
         # ── 2. Registry wiring (the three-surface spine) ─────────────────
         print("Registry:")

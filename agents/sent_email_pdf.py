@@ -43,7 +43,7 @@ def send_receipt_pdf(
     to: str,
     subject: str,
     body: str,
-    sender_name: str = "The Team",
+    sender_name: str = "",
     attached_pdf_name: str | None = None,
     out_dir: Path | None = None,
 ) -> str:
@@ -52,6 +52,9 @@ def send_receipt_pdf(
     Records: business name, To, From, Subject, Body, attached proposal name,
     and the sent timestamp. Saved under agent_output/pdfs/sent/.
     """
+    if not sender_name:
+        from agents.config import get_sender_name
+        sender_name = get_sender_name()
     d = out_dir or _SENT_DIR
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"{_slug(business_name)}_{ts}.pdf"

@@ -13,6 +13,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import agents.heavy as heavy_mod
 from agents.config import OUTPUT_DIR, SITES_DIR
 from agents.ui import (

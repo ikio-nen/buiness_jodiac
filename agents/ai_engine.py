@@ -54,6 +54,9 @@ def generate(prompt: str, system: str = "", model: str = "",
 
     Retries up to 3 times with a short backoff -- API blips are common.
     """
+    from agents.config import is_dry_run
+    if is_dry_run():
+        return "DRY RUN AI RESPONSE"
     # Non-Gemini provider selected: route there first, fall back to Gemini
     # on failure (a provider outage must not block the pipeline either).
     from agents.ai import providers

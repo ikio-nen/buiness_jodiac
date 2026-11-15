@@ -18,3 +18,5 @@ ddgs            # keyless multi-backend web search (website discovery, agent res
 dnspython       # MX deliverability checks for found emails
 phonenumbers    # libphonenumber: phone validation, E.164, WhatsApp-ready mobiles
 websockets
+python-dotenv   # environment variables from .env
+cryptography    # AES-256-GCM at-rest encryption for key vault

@@ -53,8 +53,15 @@ def _type(key, label, base, name_signals=(), tag_signals=(), why=""):
 
 _CAD_VERTICALS = (
     _type("cad_training", "CAD / drafting training centre", 95,
-          ("autocad", "auto cad", "cad training", "cad centre", "cad center",
-           "drafting", "draughtsman", "design institute", "technical training"),
+          # "cad"/"cadd" are short tokens, so they match whole words only --
+          # that is what catches "CADD Centre", "CAD DESK", "Design Tech CAD
+          # Academy" without firing on "Cascade" or "Cadbury". Indian institutes
+          # overwhelmingly spell it CADD, which no earlier signal matched.
+          ("autocad", "auto cad", "cad", "cadd", "cad training", "cad centre",
+           "cad center", "cad academy", "cad institute", "cad classes",
+           "cad solution", "cad point", "cad tech", "drafting",
+           "drafting institute", "draughting", "draughtsman", "design institute",
+           "design academy", "technical training"),
           why="Teaches CAD as a core subject - every student needs a licensed seat"),
     _type("polytechnic", "Polytechnic / diploma institute", 92,
           ("polytechnic", "polytecnic", "polytechnique", "diploma institute",
@@ -304,10 +311,10 @@ GOALS = {
     "cad_licensing": {
         "key": "cad_licensing",
         "label": "CAD / drafting software licences",
-        "product": "AutoCAD keys",
+        "product": "licensed AutoCAD seats",
         "keywords": ("autocad", "auto cad", "cad", "drafting", "draughting",
                      "solidworks", "catia", "revit", "licence", "license",
-                     "software keys", "design software"),
+                     "software keys", "design software", "autocad keys", "autocad seats"),
         "map_keywords": ("cad training", "cad institute", "autocad training",
                           "engineering college", "polytechnic", "drafting services",
                           "cad design"),

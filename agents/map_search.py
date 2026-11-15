@@ -35,9 +35,137 @@ def geocode(query: str) -> dict | None:
     }
 
 
+# Geoapify's place taxonomy has no 1:1 Overpass equivalent, so the fallback
+# asks for the business-shaped buckets once and lets the pipeline's own
+# category filter judge the names. Geoapify is the zero-card Google Places
+# substitute named in AGENTS.md; using it here means a blocked Overpass (the
+# mirrors are unreachable from some networks) degrades search instead of
+# ending it.
+# Verified against the live Places API: these six buckets return named POIs, and
+# adding accommodation/entertainment/sport either drags in unnamed OSM building
+# footprints (building.accommodation) or empties the whole response.
+_GEOAPIFY_BUCKETS = "commercial,education,healthcare,catering,service,office"
+
+
+# Overpass is asked for every business tag in the area and the ICP filters
+# afterwards, which works because OSM has thousands of rows to choose from.
+# Geoapify answers with a few dozen, so that same strategy handed back whichever
+# 50 places happen to be densest -- "schools in Rajwada" came back as a street of
+# pharmacies, and every search in an area returned an identical list. One
+# keyword table keeps the fallback on the category the user asked for; anything
+# unrecognised keeps the broad set.
+_CATEGORY_HINTS = (
+    (("school", "vidyalaya", "k-12"), "education.school"),
+    (("college", "university", "institute", "polytechnic", "campus"),
+     "education.college,education.university"),
+    # Coaching centres and training institutes are tagged as schools in
+    # Geoapify's taxonomy; education.language_school is the only "coaching"
+    # bucket it accepts and it is empty across Indian cities.
+    (("coaching", "tuition", "tutorial", "training", "academy"),
+     "education.school"),
+    (("cafe", "coffee"), "catering.cafe"),
+    (("restaurant", "food", "dhaba"), "catering.restaurant"),
+    (("pharmacy", "medical", "chemist"), "healthcare.pharmacy"),
+    (("hospital", "clinic"), "healthcare.hospital,healthcare.clinic"),
+    (("gym", "fitness"), "sport.fitness"),
+    (("hotel", "lodge", "guest house"), "accommodation.hotel"),
+    (("office", "company", "firm"), "office"),
+)
+
+
+def _hint_buckets(phrase: str | None) -> str:
+    """Geoapify buckets for the user's category phrase, or "" if unrecognised."""
+    q = (phrase or "").lower()
+    for words, buckets in _CATEGORY_HINTS:
+        if any(w in q for w in words):
+            return buckets
+    return ""
+
+
+# Geoapify mixes the place's business taxonomy with unrelated facility tags
+# ("internet_access.free", "highway.residential"), and the facility tag is
+# often LAST — taking raw[-1] labelled a college "free" and a pharmacy
+# "residential". Only roots that describe a business are considered, deepest
+# path wins.
+_BIZ_ROOTS = ("commercial", "education", "catering", "healthcare", "service",
+              "office", "entertainment", "sport", "tourism", "shop",
+              "leisure", "production", "rental", "childcare")
+
+
+def _geoapify_category(raw: list[str]) -> str:
+    """Most specific business category as a plain word (education.school)."""
+    best = ""
+    for c in raw or []:
+        if not isinstance(c, str) or not c:
+            continue
+        if c.split(".", 1)[0] not in _BIZ_ROOTS:
+            continue
+        if c.count(".") > best.count("."):
+            best = c
+    leaf = best.rsplit(".", 1)[-1].replace("_", " ").strip() if best else ""
+    return leaf or "other"
+
+
+def _geoapify_rows(payload: dict) -> list[dict]:
+    """Shape a Geoapify response into the Overpass row contract, dropping
+    unnamed POIs and duplicate names (a place often appears twice)."""
+    out: list[dict] = []
+    seen: set[str] = set()
+    for r in payload.get("results", []) or []:
+        name = (r.get("name") or "").strip()
+        if not name or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        cat = _geoapify_category(r.get("categories"))
+        out.append({
+            "name": name,
+            "lat": r.get("lat"),
+            "lon": r.get("lon"),
+            "website": r.get("website", "") or "",
+            "phone": r.get("phone", "") or "",
+            "email": "",
+            "address": r.get("address", "") or "",
+            "opening_hours": "",
+            "category": cat,
+            "tags": {"source": "geoapify", "category": cat},
+        })
+    return out
+
+
+def _from_geoapify(lat: float, lon: float, radius: int,
+                   phrase: str | None = None) -> list[dict] | None:
+    """Overpass-shaped results from Geoapify, or None when it can't help.
+
+    Same dict contract as the Overpass branch so every downstream stage
+    (no-website filter, category filter, ICP, evidence notes) keeps working.
+    The user's category phrase narrows the request; if that bucket is empty
+    here, the broad business set is tried before giving up."""
+    try:
+        from .outreach_apis import geoapify_places
+    except Exception:
+        return None
+    hint = _hint_buckets(phrase)
+    for buckets in ([hint, _GEOAPIFY_BUCKETS] if hint else [_GEOAPIFY_BUCKETS]):
+        payload = geoapify_places(lat, lon, buckets,
+                                  radius_m=max(radius, 1000), limit=50)
+        if not isinstance(payload, dict) or payload.get("error"):
+            continue
+        rows = _geoapify_rows(payload)
+        if rows:
+            return rows
+    return None
+
+
 def search_businesses(lat: float, lon: float, radius: int = 2000,
-                      categories: list[str] | None = None) -> list[dict]:
-    """Search for businesses near lat/lon via Overpass API."""
+                      categories: list[str] | None = None,
+                      phrase: str | None = None) -> list[dict]:
+    """Search for businesses near lat/lon via Overpass API.
+
+    ``phrase`` is the user's own category wording ("schools", "coaching
+    centres"). Overpass ignores it -- it fetches every category and the ICP
+    filters afterwards -- but the places fallback uses it, because it only
+    returns a few dozen rows and picking them blind drops the query.
+    """
     if categories is None:
         categories = CATEGORIES
 
@@ -112,10 +240,18 @@ def search_businesses(lat: float, lon: float, radius: int = 2000,
             # no OSM data here. That is an honest empty, not an error.
             data = {"elements": []}
         else:
+            # Every mirror unreachable is a network condition, not an empty
+            # region. Try the configured places provider before giving up.
+            fallback = _from_geoapify(lat, lon, radius, phrase=phrase)
+            if fallback:
+                print(f"  [map] Overpass unreachable — Geoapify returned "
+                      f"{len(fallback)} businesses")
+                return fallback
             mirror_note = (f"; {len(empty_endpoints)} mirror(s) answered empty "
                            f"for this region") if empty_endpoints else ""
             raise RuntimeError(f"Overpass API failed on all {len(OVERPASS_URLS)} "
-                               f"endpoints ({failure}{mirror_note})")
+                               f"endpoints ({failure}{mirror_note}); no places "
+                               f"fallback available (set GEOAPIFY_API_KEY)")
     businesses = []
     seen_names = set()
 
@@ -206,13 +342,20 @@ def _find_website_dns(name: str, budget: float = 3.0) -> str:
     import socket
     import time
 
-    slug = name.lower().replace(" ", "").replace("'", "").replace(".", "")
-    slug_dash = name.lower().replace(" ", "-").replace("'", "").replace(".", "")
+    # Strip non-alphanumeric chars for valid DNS labels
+    import re as _re
+    clean_slug = _re.sub(r"[^a-z0-9\-]", "", name.lower().replace(" ", "-")).strip("-")
+    clean_nospace = clean_slug.replace("-", "")
 
+    raw_candidates = [
+        f"www.{clean_nospace}.com", f"www.{clean_nospace}.in", f"www.{clean_nospace}.org",
+        f"www.{clean_slug}.com", f"www.{clean_slug}.in", f"www.{clean_slug}.org",
+        f"{clean_nospace}.com", f"{clean_nospace}.in",
+    ]
+    # RFC 1035: domain <= 253 chars, each label 1..63 chars
     candidates = [
-        f"www.{slug}.com", f"www.{slug}.in", f"www.{slug}.org",
-        f"www.{slug_dash}.com", f"www.{slug_dash}.in", f"www.{slug_dash}.org",
-        f"{slug}.com", f"{slug}.in",
+        d for d in raw_candidates
+        if 4 <= len(d) <= 253 and all(1 <= len(part) <= 63 for part in d.split("."))
     ]
 
     deadline = time.monotonic() + budget
@@ -225,7 +368,7 @@ def _find_website_dns(name: str, budget: float = 3.0) -> str:
             try:
                 socket.gethostbyname(domain)
                 return f"https://{domain}"
-            except (socket.gaierror, socket.timeout, OSError):
+            except (socket.gaierror, socket.timeout, OSError, UnicodeError, ValueError):
                 continue
     finally:
         socket.setdefaulttimeout(previous)

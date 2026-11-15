@@ -514,17 +514,31 @@ def brain_query(query: str, area: str = "") -> str:
 # ── Web search tool (the agents' own eyes) ──────────────────────────
 
 def web_search(query: str, timeout: int = 12) -> str:
-    """Fetch Bing results for a query and return title+snippet lines.
+    """Search the web and return title+snippet lines.
 
-    Best-effort: returns '' on any failure so the agent can answer without it.
+    Exa (neural search, keyed via env/config) first — it needs no scraping —
+    then the Bing scraper as fallback. Best-effort: returns '' on any failure
+    so the agent can answer without it.
     """
     if not query or not query.strip():
         return ""
+    q = query.strip()
+    try:
+        from . import outreach_apis as oa
+        r = oa.exa_search(q, max_results=6)
+        if "error" not in r and r.get("results"):
+            return "\n".join(
+                f"{it.get('title', '')} -- {it.get('content', '')[:220]}"
+                f" ({it.get('url', '')})"
+                for it in r["results"] if it.get("title"))
+    except Exception:
+        pass
     try:
         from scrapling.fetchers import Fetcher
         from urllib.parse import quote
-        url = f"https://www.bing.com/search?q={quote(query.strip())}"
-        page = Fetcher.get(url, timeout=timeout)
+        from .url_guard import MAX_REDIRECTS, safe_url
+        url = safe_url(f"https://www.bing.com/search?q={quote(query.strip())}")
+        page = Fetcher.get(url, timeout=timeout, max_redirects=MAX_REDIRECTS)
         if not page:
             return ""
         out = []
@@ -549,7 +563,12 @@ def web_search(query: str, timeout: int = 12) -> str:
 # ── read_url: open a specific page ─────────────────────────────────
 
 def read_url(url: str, timeout: int = 12) -> str:
-    """Fetch one URL and return its readable text. Best-effort: '' on failure."""
+    """Fetch one URL and return its readable text. Best-effort: '' on failure.
+
+    The URL usually comes from the model, so it is untrusted: the guard runs
+    before the request, and the redirect count is capped so a page cannot walk
+    us to the loopback API where the launch cookie lives.
+    """
     url = (url or "").strip()
     if not url:
         return ""
@@ -557,7 +576,9 @@ def read_url(url: str, timeout: int = 12) -> str:
         return ""
     try:
         from scrapling.fetchers import Fetcher
-        page = Fetcher.get(url, timeout=timeout)
+        from .url_guard import MAX_REDIRECTS, safe_url
+        url = safe_url(url)
+        page = Fetcher.get(url, timeout=timeout, max_redirects=MAX_REDIRECTS)
         if not page:
             return ""
         bodies = page.css("body")

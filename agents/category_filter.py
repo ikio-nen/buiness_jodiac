@@ -34,17 +34,27 @@ STRICT_EDUCATION_TAGS = (
 # A business is excluded when the keyword hits its category tag OR its name.
 EXCLUSION_LEXICON = {
     "school": {"tags": ("school", "kindergarten", "prep_school"),
-               "names": ("school", "vidyalaya", "convent", "vidyamandir")},
+               "names": ("school", "vidyalaya", "convent", "vidyamandir",
+                         "high school", "higher secondary", "secondary school",
+                         "public school")},
     "college": {"tags": ("college", "university"),
-                "names": ("college", "university", "mahavidyalaya", "vidyapith")},
+                "names": ("college", "university", "mahavidyalaya", "vidyapith",
+                          "institute of technology", "school of engineering",
+                          "engineering college", "college of engineering",
+                          "polytechnic")},
     "university": {"tags": ("university", "college"),
                    "names": ("university", "college", "mahavidyalaya", "vidyapith")},
-    "collg": {"tags": ("college", "university"), "names": ("college", "university")},
-    "cllg": {"tags": ("college", "university"), "names": ("college", "university")},
+    "collg": {"tags": ("college", "university"), "names": ("college", "university", "institute of technology")},
+    "cllg": {"tags": ("college", "university"), "names": ("college", "university", "institute of technology")},
     "colleges": {"tags": ("college", "university"),
-                 "names": ("college", "university", "mahavidyalaya", "vidyapith")},
+                 "names": ("college", "university", "mahavidyalaya", "vidyapith",
+                           "institute of technology", "school of engineering",
+                           "engineering college", "college of engineering",
+                           "polytechnic")},
     "schools": {"tags": ("school", "kindergarten", "prep_school"),
-                "names": ("school", "vidyalaya", "convent", "vidyamandir")},
+                "names": ("school", "vidyalaya", "convent", "vidyamandir",
+                          "high school", "higher secondary", "secondary school",
+                          "public school")},
     "universities": {"tags": ("university", "college"),
                      "names": ("university", "college")},
     "polytechnic": {"tags": ("college",), "names": ("polytechnic",)},
@@ -128,9 +138,25 @@ def extract_exclusions(category: str) -> tuple[list[str], str]:
                 excluded.extend(words)
             else:
                 excluded.append(item)
+    # Bans arrive as prose ("not colleges or schools"), so joiners and filler
+    # survive the split. They must never become ban words: an unknown keyword
+    # falls through to a raw substring match, and "or" would then ban every
+    # business with an "or" in its name ("Excel Computer Corner"). User
+    # authority stays intact -- only words that name nothing are dropped.
+    excluded = [w for w in excluded
+                if len(w) > 2 and w not in _BAN_STOPWORDS]
     if segments[0].strip():
         keep_parts.append(segments[0].strip(" ,."))
     return excluded, ". ".join(keep_parts) if keep_parts else ""
+
+
+# Words that appear in ban phrasing but name nothing to exclude.
+_BAN_STOPWORDS = {
+    "or", "and", "nor", "the", "a", "an", "of", "in", "at", "for", "with",
+    "to", "from", "by", "on", "just", "only", "also", "any", "such", "like",
+    "private", "govt", "government", "both", "either", "plus", "any", "all",
+    "give", "me", "want", "dont", "don", "t", "s",
+}
 
 
 # Common misspellings/abbreviations users type in exclusions, mapped into
@@ -216,6 +242,30 @@ def _no_category_signal(category: str) -> bool:
     return bool(words) and all(w in _CATEGORY_FILLERS for w in words)
 
 
+# A phrase that asks for TRAINING CENTRES is asking for shops that teach, not
+# for colleges and schools that happen to own a CAD lab: a per-seat licence
+# pitch goes to the trainer, and a campus has its own procurement. When the
+# phrase names training and does not name a campus type, colleges/schools are
+# out of scope and are treated exactly like a typed ban -- because that is what
+# the user meant, whether or not they said "not colleges".
+_TRAINING_WORDS = ("training", "coaching", "tutorial", "classes", "cadd",
+                   "drafting", "draughting")
+_CAMPUS_WORDS = ("college", "university", "school", "polytechnic", "campus",
+                 "mahavidyalaya", "vidyapith", "educational", "education")
+
+
+def _implicit_exclusions(positive_phrase: str, already: list[str]) -> list[str]:
+    """Colleges/schools implied out of scope by a training-centre phrase."""
+    text = (positive_phrase or "").lower()
+    if not text:
+        return []
+    if not any(w in text for w in _TRAINING_WORDS):
+        return []
+    if any(w in text for w in _CAMPUS_WORDS):
+        return []
+    return [w for w in ("college", "school", "university", "polytechnic", "engineering college") if w not in already]
+
+
 def filter_by_category(businesses: list[dict], category: str,
                        goal: dict = None) -> tuple[list[dict], str]:
     """Filter businesses to match the user's stated intent.
@@ -241,6 +291,8 @@ def filter_by_category(businesses: list[dict], category: str,
     # user who says "remove schools and colleges" must never see a convent
     # school come back -- that was the Bandel failure.
     exclusions, positive_phrase = extract_exclusions(category)
+    implicit = _implicit_exclusions(positive_phrase, exclusions)
+    exclusions = exclusions + implicit
     excl_dropped: dict[str, int] = {}
     if exclusions:
         survivors = []
@@ -309,10 +361,12 @@ def filter_by_category(businesses: list[dict], category: str,
                         f"{', '.join(b.get('name', '?') for b in vetoed[:4])}]")
         excl_txt = (f"user exclusions dropped {sum(excl_dropped.values())} "
                     f"({_fmt_counts(excl_dropped)}); " if excl_dropped else "")
+        impl_txt = (" [phrase asks for training centres, so "
+                    + ", ".join(implicit) + " were out of scope]" if implicit else "")
         report = (f"Filtered {len(businesses) + sum(excl_dropped.values())} -> {len(kept)} "
                   f"for \"{category}\": {excl_txt}"
                   f"hard tags dropped {sum(dropped.values())} ({_fmt_drops(dropped)}); "
-                  f"AI dropped {ai_drops}.{veto_txt}")
+                  f"AI dropped {ai_drops}.{veto_txt}{impl_txt}")
         return kept, report
 
     # Stage 3: fail closed. For a goal-scoped search the ICP has already judged

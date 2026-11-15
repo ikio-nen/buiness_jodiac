@@ -9,6 +9,8 @@ from urllib.parse import urljoin, urlparse
 
 from scrapling.fetchers import Fetcher
 
+from .url_guard import MAX_REDIRECTS
+
 from .config import DATA_DIR
 
 
@@ -52,8 +54,18 @@ def scrape_business(business: dict) -> dict:
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
 
+    # The URL came out of a search result, so it is untrusted: refuse anything
+    # pointing at the loopback API, the LAN or a metadata endpoint before the
+    # request leaves the machine.
     try:
-        page = Fetcher.get(url, timeout=15)
+        from .url_guard import safe_url
+        url = safe_url(url)
+    except Exception as exc:
+        print(f"  [GUARD] refused {url}: {exc}")
+        return result
+
+    try:
+        page = Fetcher.get(url, timeout=15, max_redirects=MAX_REDIRECTS)
     except Exception as e:
         print(f"  [SCRAPER] Failed to fetch {url}: {e}")
         return result
@@ -156,7 +168,9 @@ def scrape_google_maps_reviews(business_name: str, location: str = "") -> dict:
     search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}"
 
     try:
-        page = Fetcher.get(search_url, timeout=10)
+        from .url_guard import MAX_REDIRECTS, safe_url
+        search_url = safe_url(search_url)
+        page = Fetcher.get(search_url, timeout=10, max_redirects=MAX_REDIRECTS)
     except Exception:
         return result
 
@@ -175,7 +189,8 @@ def scrape_google_maps_reviews(business_name: str, location: str = "") -> dict:
     return result
 
 
-def enrich_businesses(businesses: list[dict], scrape_reviews: bool = True) -> list[dict]:
+def enrich_businesses(businesses: list[dict], scrape_reviews: bool = True,
+                      budget: float = 180.0) -> list[dict]:
     """Enrich a list of businesses by scraping their websites.
     
     Returns the same list with enriched data added to each business dict.
@@ -184,10 +199,18 @@ def enrich_businesses(businesses: list[dict], scrape_reviews: bool = True) -> li
     _SCRAPER_TIMEOUT_S (DNS lookups and some TLS handshakes can ignore the
     HTTP client's own timeout) is skipped, so one bad site can no longer
     hang the whole scrape leg with the UI stuck on "Scraping N websites".
+
+    ``budget`` is a TOTAL ceiling for the call. The per-site watchdog alone
+    was not enough: 20 sites x 30s kept the web UI's search queued for over
+    ten minutes with the user watching a spinner, while the same search in
+    the CLI finished in under two. Whatever is left when the budget runs out
+    is returned unscraped, so the batch is never silently truncated.
     """
     import threading
+    import time
 
     _SCRAPER_TIMEOUT_S = 30
+    _started = time.monotonic()
 
     def _scrape_one(biz: dict, out: dict) -> None:
         d = scrape_business(biz)
@@ -199,7 +222,13 @@ def enrich_businesses(businesses: list[dict], scrape_reviews: bool = True) -> li
         out.update(d)
 
     enriched = []
-    for biz in businesses:
+    for _i, biz in enumerate(businesses):
+        if time.monotonic() - _started > budget:
+            remaining = businesses[_i:]
+            print(f"  [SCRAPER] budget {budget:.0f}s spent -- "
+                  f"{len(remaining)} left unscraped")
+            enriched.extend(remaining)
+            break
         print(f"  [SCRAPER] Scraping {biz.get('name', 'Unknown')}...")
         data: dict = {}
         worker = threading.Thread(target=_scrape_one, args=(biz, data), daemon=True)

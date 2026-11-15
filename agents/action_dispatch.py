@@ -149,7 +149,14 @@ def _handle_search(params: dict, session, sender: str) -> dict:
         return {"success": False, "message": f"Search error: {errors}",
                 "data": report, "live_events": []}
 
-    message = f"Found {total} businesses, {len(no_site)} without website"
+    # A filtered-out batch is not an empty area: say what was found first, or
+    # "Found 0 businesses" contradicts the filter report printed right below it.
+    found = report.get("search", {}).get("found_raw", total)
+    if found > total:
+        message = (f"Found {found} places, {total} kept after filtering, "
+                   f"{len(no_site)} without website")
+    else:
+        message = f"Found {total} businesses, {len(no_site)} without website"
     filter_report = report.get("search", {}).get("filter_report", "")
     if filter_report:
         message += f"\n  [filter] {filter_report}"
@@ -205,6 +212,10 @@ def _handle_search(params: dict, session, sender: str) -> dict:
         "data": {
             "total": total, "no_site": len(no_site),
             "with_site": report.get("search", {}).get("with_site", 0),
+            # Pre-filter count and the ICP's own explanation ride along so the
+            # results card can say "23 of 508" instead of silently dropping 485.
+            "found_raw": found,
+            "filter_report": filter_report,
             "icp": report.get("search", {}).get("icp", {}),
             "businesses": no_site,
             "phones_csv": phones_csv,

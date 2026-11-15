@@ -4,27 +4,27 @@
    ═══════════════════════════════════════════════════════════════ */
 
 :root {
-  --paper:       #f3ecdc;
-  --paper-deep:  #e9dfc8;
-  --panel:       #fbf6ea;
-  --ink:         #3d3529;
-  --ink-soft:    #857a63;
-  --line:        #d9cdae;
-  --line-warm:   #c9b98f;
-  --moss:        #9db98a;
-  --moss-deep:   #7a9a68;
-  --moss-floor:  #c3d1ac;
-  --wood:        #c9a06d;
-  --wood-deep:   #9a7548;
-  --brick:       #d8a86d;
-  --accent:      #e0954f;
-  --accent-soft: #f0c98e;
-  --rose:        #c1666b;
-  --green-ok:    #6f9e58;
-  --red-bad:     #c0504d;
-  --amber-warn:  #d9a441;
-  --shadow:      0 2px 0 rgba(61, 53, 41, 0.18);
-  --pixel-font:  'Press Start 2P', monospace;
+  --paper:       #f1e6d0;
+  --paper-deep:  #e5d7ba;
+  --panel:       #faf3e3;
+  --ink:         #2c271f;
+  --ink-soft:    #6f644d;
+  --line:        #d3c4a2;
+  --line-warm:   #bda679;
+  --moss:        #8fac79;
+  --moss-deep:   #5f7c4b;
+  --moss-floor:  #c4cfaa;
+  --wood:        #bd8b56;
+  --wood-deep:   #85603b;
+  --brick:       #c08553;
+  --accent:      #a34a28;   /* madder ink — the only colour that acts */
+  --accent-soft: #e8c6a3;
+  --rose:        #a3544e;
+  --green-ok:    #4a6b3c;
+  --red-bad:     #9a3328;
+  --amber-warn:  #a8791f;
+  --shadow:      3px 3px 0 rgba(44, 39, 31, 0.14);
+  --pixel-font:  'Silkscreen', 'Press Start 2P', monospace;
   --body-font:   'VT323', 'Courier New', monospace;
 
   /* Corner scale — three steps, no arbitrary values. Micro chips and marks
@@ -83,10 +83,9 @@ html, body {
      list with REAL units — `0.25` is an invalid track size and even
      calc(var * 1fr) is rejected for flexible lengths, so the JS writes
      `minmax(280px, 0.25fr) 0px minmax(340px, 1fr)` verbatim. The var()
-     fallback is the designed 65/35 split. An invalid substituted value
-     would collapse the whole desktop grid (squeezed floor, dead ambient
-     band, unanchored grip), which is why the value ships pre-validated. */
-  grid-template-columns: var(--floor-cols, minmax(280px, 1.9fr) 0px minmax(340px, 1fr));
+     fallback is the balanced 57/43 split so the chat and review card
+     have plenty of room on wide screens without empty floor space. */
+  grid-template-columns: var(--floor-cols, minmax(280px, 1.35fr) 0px minmax(360px, 1fr));
   grid-template-rows: auto minmax(0, 1fr) auto;
   grid-template-areas:
     "topbar topbar topbar"
@@ -171,6 +170,21 @@ body.is-resizing .grip::before { background: var(--wood-deep); width: 6px; }
   border-radius: 4px;
   padding: 5px 8px;
   box-shadow: 2px 2px 0 rgba(61,53,41,.35);
+}
+
+.dry-run-badge {
+  font-family: var(--pixel-font);
+  font-size: 9px;
+  background: var(--amber-warn);
+  color: var(--ink);
+  border: 2px solid var(--ink);
+  border-radius: 4px;
+  padding: 4px 6px;
+  margin-left: 8px;
+  box-shadow: 2px 2px 0 rgba(61,53,41,.25);
+  display: inline-block;
+  vertical-align: middle;
+  letter-spacing: 0.5px;
 }
 
 .topbar-note { color: var(--ink-soft); margin-left: 12px; font-size: 17px; }
@@ -477,7 +491,7 @@ html[data-phase="night"]     #clockIcon { color: #8fa8d8; }
   position: absolute; left: 38%; top: 30%; width: 24%; height: 26%;
   border: 3px dashed var(--wood-deep);
   border-radius: var(--r-lg);
-  background: rgba(224, 149, 79, 0.12);
+  background: rgba(163, 74, 40, 0.12);
   z-index: 0;
 }
 
@@ -512,7 +526,7 @@ html[data-phase="night"]     #clockIcon { color: #8fa8d8; }
   transition: transform .15s ease;
 }
 .station:hover .fur { transform: scale(1.05); }  /* grow the furniture, never the positioned box */
-.station.active .fur { filter: drop-shadow(0 0 6px rgba(224,149,79,.85)); }
+.station.active .fur { filter: drop-shadow(0 0 6px rgba(163, 74, 40,.85)); }
 .station.active .zone-label { background: var(--accent); color: #fff8ec; border-color: var(--ink); }
 
 .zone-label {
@@ -631,14 +645,18 @@ html[data-phase="night"]     #clockIcon { color: #8fa8d8; }
 /* hired-agent desks (station-hired-0..7) — open floor areas, clear of the
    built-in stations above, the ops feed below, and the door on the right.
    Two rows between the built-in rows; each desk also holds its bot. */
-.station-hired-0 { left: 12%; top: 36%; }
-.station-hired-1 { left: 30%; top: 36%; }
-.station-hired-2 { left: 48%; top: 36%; }
-.station-hired-3 { left: 66%; top: 36%; }
-.station-hired-4 { left: 84%; top: 36%; transform: translateX(-100%); }
-.station-hired-5 { left: 26%; top: 76%; }
-.station-hired-6 { left: 56%; top: 76%; }
-.station-hired-7 { left: 76%; top: 76%; }
+/* These are built by ensureHiredStations() in app.js, which sets the ID
+   `station-hired-N` and only the generic `station-hired` class. Positioning
+   them by the -N *class* matched nothing, so all eight desks rendered stacked
+   at the top-left corner of the room. The ID is the selector that exists. */
+#station-hired-0 { left: 12%; top: 36%; }
+#station-hired-1 { left: 30%; top: 36%; }
+#station-hired-2 { left: 48%; top: 36%; }
+#station-hired-3 { left: 66%; top: 36%; }
+#station-hired-4 { left: 88%; top: 36%; transform: translateX(-100%); }
+#station-hired-5 { left: 26%; top: 76%; }
+#station-hired-6 { left: 56%; top: 76%; }
+#station-hired-7 { left: 76%; top: 76%; }
 
 /* ── Sprites (pixel people) ──────────────────────────────────── */
 
@@ -778,7 +796,7 @@ html[data-phase="night"]     #clockIcon { color: #8fa8d8; }
   border-radius: 3px;
   transform: translate(-50%, -50%);
   z-index: 8;
-  box-shadow: 0 0 8px rgba(224, 149, 79, .8);
+  box-shadow: 0 0 8px rgba(163, 74, 40, .8);
 }
 .packet-label {
   position: absolute;
@@ -811,13 +829,14 @@ html[data-phase="night"]     #clockIcon { color: #8fa8d8; }
    of this view — is never more than trimmed at its feet. Older lines scroll. */
 .ops-feed {
   position: absolute;
-  left: 10px; right: 10px; bottom: 8px;
+  left: 0; right: 0; bottom: 0;
   max-height: 56px;
   overflow-y: auto;
   background: rgba(251, 246, 234, 0.94);
   border: 2px solid var(--ink);
-  border-radius: 6px;
-  padding: 4px 8px;
+  border-width: 2px 0 0 0;
+  border-radius: 0 0 calc(var(--r-md) - 1px) calc(var(--r-md) - 1px);
+  padding: 4px 10px;
   z-index: 10;
   font-size: 16px;
   line-height: 1.35;
@@ -1099,7 +1118,7 @@ html[data-phase="night"]     #clockIcon { color: #8fa8d8; }
   padding: 4px 6px 4px 12px;
   box-shadow: var(--shadow);
 }
-.composer-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224,149,79,.25); }
+.composer-box:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(163, 74, 40,.25); }
 .composer-prompt { color: var(--accent); font-weight: bold; flex: none; }
 #userInput {
   flex: 1;
@@ -1357,7 +1376,7 @@ html[data-phase="night"]     #clockIcon { color: #8fa8d8; }
   color: var(--ink);
   padding: 5px 7px;
 }
-.add-skill input:focus, .add-skill textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224,149,79,.25); outline: none; }
+.add-skill input:focus, .add-skill textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(163, 74, 40,.25); outline: none; }
 .agent-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .agent-chip {
   display: inline-flex; align-items: center; gap: 4px;
@@ -1407,7 +1426,7 @@ html[data-phase="night"]     #clockIcon { color: #8fa8d8; }
 .roster-card .roster-meta { min-width: 0; }
 .roster-card .roster-meta > * { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .roster-card:hover { transform: translateY(-2px); }
-.roster-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(224,149,79,.35); }
+.roster-card.active { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(163, 74, 40,.35); }
 .roster-card.done { border-color: var(--green-ok); }
 .roster-card.error { border-color: var(--red-bad); animation: shake .12s linear 5; }
 .roster-ava {
@@ -1528,24 +1547,177 @@ html[data-phase="night"]     #clockIcon { color: #8fa8d8; }
 .status-label { color: var(--ink-soft); }
 .status-value { text-align: right; max-width: 60%; word-break: break-word; }
 
-/* review card */
-.review-field { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
-.review-label { font-family: var(--pixel-font); font-size: 6px; color: var(--ink-soft); }
-.review-field input, .review-field textarea {
-  font-family: var(--body-font); font-size: 16px;
-  border: 2px solid var(--line-warm); border-radius: 4px;
-  background: #fffdf5; color: var(--ink);
-  padding: 5px 7px;
+/* ── Email Review Screen (roomy, full width, full height) ──────── */
+#reviewCard {
+  width: 100%;
+  max-width: 100%;
+  flex: 1 0 auto;
+  min-height: min(620px, calc(100vh - 240px));
+  display: flex;
+  flex-direction: column;
 }
-.review-field input:focus, .review-field textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(224,149,79,.25); outline: none; }
-.review-biz { font-size: 18px; margin-top: 4px; }
-.review-attach { display: flex; align-items: center; gap: 8px; font-size: 14px; color: var(--ink-soft); }
-.review-att-status { font-size: 14px; }
-.review-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
-.review-btn { font-family: var(--body-font); font-size: 16px; border: 2px solid var(--ink); border-radius: var(--r-md); padding: 5px 10px; cursor: pointer; background: var(--paper); }
-.review-btn-approve { background: var(--green-ok); color: #fff8ec; }
-.review-btn-skip { background: var(--paper-deep); }
-.review-btn-cancel { background: #f0d3ce; color: var(--red-bad); }
+#reviewCard .data-card,
+.review-card {
+  width: 100%;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 12px 14px;
+  overflow: visible;
+  border-radius: var(--r-md);
+  box-sizing: border-box;
+  background: #fbf6e8;
+}
+#reviewCard .data-card-title {
+  margin-bottom: 4px;
+}
+.review-biz {
+  font-size: 19px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.review-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-top: 6px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.review-label {
+  font-family: var(--pixel-font);
+  font-size: 8px;
+  color: var(--ink-soft);
+  letter-spacing: .5px;
+  text-transform: uppercase;
+}
+.review-field input {
+  font-family: var(--body-font);
+  font-size: 17px;
+  border: 2px solid var(--line-warm);
+  border-radius: var(--r-sm);
+  background: #fffdf5;
+  color: var(--ink);
+  padding: 6px 10px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.review-field input:focus, .review-field textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(163, 74, 40, .25);
+  outline: none;
+}
+.review-field input:disabled {
+  background: var(--paper);
+  color: var(--ink-soft);
+  border-color: var(--line);
+  cursor: not-allowed;
+}
+.review-field-body,
+.review-field:has(textarea) {
+  flex: 1 1 auto;
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+}
+.review-field textarea {
+  font-family: var(--body-font);
+  font-size: 16px;
+  line-height: 1.45;
+  border: 2px solid var(--line-warm);
+  border-radius: var(--r-sm);
+  background: #fffdf5;
+  color: var(--ink);
+  padding: 8px 10px;
+  width: 100%;
+  box-sizing: border-box;
+  flex: 1;
+  min-height: 180px;
+  resize: vertical;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.review-field-attach,
+.review-field:has(.review-attach) {
+  margin-top: 6px;
+}
+.review-attach {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--ink-soft);
+  flex-wrap: wrap;
+  width: 100%;
+}
+.review-attach input[type="file"] {
+  font-size: 14px;
+  max-width: 260px;
+  padding: 2px 4px;
+  border: 1px dashed var(--line-warm);
+  border-radius: var(--r-sm);
+  background: var(--paper);
+  cursor: pointer;
+}
+.review-att-status {
+  font-size: 14px;
+  color: var(--moss-deep);
+  font-weight: 500;
+}
+.review-actions {
+  position: sticky;
+  bottom: -14px;
+  background: #fbf6e8;
+  padding: 10px 0 2px;
+  margin-top: 10px;
+  border-top: 2px dashed var(--line-warm);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  z-index: 5;
+}
+.review-btn {
+  font-family: var(--body-font);
+  font-size: 17px;
+  font-weight: 600;
+  border: 2px solid var(--ink);
+  border-radius: var(--r-md);
+  padding: 7px 16px;
+  cursor: pointer;
+  background: var(--paper);
+  box-shadow: 2px 2px 0 rgba(44, 39, 31, .15);
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+.review-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 2px 3px 0 rgba(44, 39, 31, .25);
+}
+.review-btn:active {
+  transform: translateY(1px);
+  box-shadow: 1px 1px 0 rgba(44, 39, 31, .2);
+}
+.review-btn-approve {
+  background: var(--green-ok);
+  color: #fff8ec;
+  border-color: var(--ink);
+}
+.review-btn-approve:hover {
+  filter: brightness(1.08);
+}
+.review-btn-skip {
+  background: var(--paper-deep);
+  color: var(--ink);
+}
+.review-btn-cancel {
+  background: #f0d3ce;
+  color: var(--red-bad);
+  border-color: var(--red-bad);
+  margin-left: auto;
+}
 
 /* Drawers: contain scroll chaining so a scroll inside never walks the page */
 .sidebar,
@@ -1586,6 +1758,8 @@ select.btn {
     grid-template-rows: auto minmax(130px, 20vh) minmax(0, 1fr) auto;
     grid-template-areas:
       "topbar" "floor" "cmd" "roster";
+    overflow-x: hidden;
+    max-width: 100vw;
   }
   /* No side-by-side split on a stacked layout — the grip is meaningless. */
   .grip { display: none; }
@@ -1597,6 +1771,67 @@ select.btn {
      .messages: it is flex:1 with min-height:0 so it yields before the composer
      does, and a floor here would clip the send button on a very short window. */
   .cmd-stats { display: none; }
+}
+
+@media (max-width: 600px) {
+  body {
+    overflow-x: hidden;
+  }
+  .app {
+    padding: 6px;
+    gap: 6px;
+  }
+  .topbar {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 4px 8px;
+    min-width: 0;
+  }
+  .topbar-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .topbar-note {
+    display: none;
+  }
+  .clock-chip {
+    margin-left: 0;
+  }
+  .topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+  .goal-chip {
+    max-width: 140px;
+    padding: 2px 6px;
+    font-size: 13px;
+  }
+  .goal-chip span {
+    max-width: 110px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .conn {
+    padding: 2px 5px;
+    font-size: 13px;
+  }
+  .conn span:last-child {
+    display: none;
+  }
+  .icon-btn {
+    width: 26px;
+    height: 26px;
+    font-size: 14px;
+  }
+  .roster-counters {
+    display: none;
+  }
 }
 
 /* Narrow floor (splitter dragged left, desktop widths): same declutter as
@@ -1816,7 +2051,7 @@ html[data-phase="night"]     { --sun-strength: .15; --dust-strength: .3; }
    the theme uses, and the rack glows warm because it is the brain. */
 .fur { filter: drop-shadow(3px 4px 0 rgba(61, 53, 41, .12)); }
 .plant, .door { box-shadow: 2px 3px 0 rgba(61, 53, 41, .18); }
-.rack-unit { box-shadow: 0 0 16px rgba(224, 149, 79, .18), 3px 4px 0 rgba(61, 53, 41, .16); }
+.rack-unit { box-shadow: 0 0 16px rgba(163, 74, 40, .18), 3px 4px 0 rgba(61, 53, 41, .16); }
 
 /* The room gets an inner rim light and a floor falloff, so the eye reads
    walls, floor and furniture as layers instead of one flat field. */
@@ -1885,3 +2120,782 @@ html[data-phase="night"]     { --sun-strength: .15; --dust-strength: .3; }
   0%, 100% { box-shadow: 0 0 0 0 rgba(111, 158, 88, .55); }
   50%      { box-shadow: 0 0 0 4px rgba(111, 158, 88, 0); }
 }
+
+/* ── Motion pass: a staff, not a set ───────────────────────────────
+   Skin only — every rule targets markup that already exists, and the
+   global prefers-reduced-motion block above neutralizes all of it. */
+
+/* Spawn: a bot pops into the room slightly compressed, then settles.
+   app.js adds .bot-spawn once and removes it; keep the anchor transform. */
+.bot.bot-spawn { animation: bot-in .55s cubic-bezier(.34, 1.45, .5, 1) both; }
+@keyframes bot-in {
+  from { opacity: 0; transform: translate(-50%, -92%) scale(.55); }
+  to   { opacity: 1; transform: translate(-50%, -100%) scale(1); }
+}
+
+/* Idle life: bots at rest breathe subtle figure sway, staggered so the room
+   never moves in lockstep. :not leaves walking/working/error/spawning alone
+   — those states own the sprite's existing animations. */
+.bot:not(.walking):not(.working):not(.error):not(.bot-spawn) .sprite {
+  animation: idle-breathe 3.4s ease-in-out infinite;
+}
+#botsLayer .bot:nth-child(2n) .sprite { animation-delay: -1.7s; }
+#botsLayer .bot:nth-child(3n) .sprite { animation-delay: -0.9s; }
+@keyframes idle-breathe {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  50%      { transform: translateY(-1.5px) rotate(.6deg); }
+}
+
+/* Hover: a bot under the cursor lifts its face toward you. */
+.bot { transition: filter .15s ease; }
+.bot:hover { filter: brightness(1.06) drop-shadow(0 2px 0 rgba(61, 53, 41, .35)); }
+
+/* Roster strip: cards slide in on first build, lift on hover, and the
+   workload bar eases to its new width instead of snapping. */
+.roster-card { animation: card-in .35s ease both; }
+.roster-card:nth-child(2n) { animation-delay: .06s; }
+.roster-card:nth-child(3n) { animation-delay: .12s; }
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.roster-card { transition: transform .18s ease, box-shadow .18s ease; }
+.roster-card:hover { transform: translateY(-2px); box-shadow: 2px 3px 0 rgba(61, 53, 41, .25); }
+.roster-bar i { transition: width .45s cubic-bezier(.22, 1, .36, 1); }
+
+/* Station labels: when a station pulses on activity, its label hops too, so
+   the eye finds which work the packet belongs to. */
+.station .zone-label { transition: transform .18s ease; }
+.station.active .zone-label { transform: translateY(-2px); animation: label-hop .9s ease infinite; }
+@keyframes label-hop {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .72; }
+}
+
+/* ── Office counters + attention (from the similar-projects pass) ── */
+
+/* Three live numbers anchored at the left of the roster strip: work started,
+   finished, failed — the glanceable layer Mohano/Age of Agents put above
+   their rooms. Zero states stay quiet; every bump pops once. */
+.roster-counters {
+  flex: none;
+  display: flex; flex-direction: column; gap: 5px; justify-content: center;
+  padding-right: 10px; margin-right: 2px;
+  border-right: 1px dashed var(--line-warm);
+}
+.oc {
+  display: flex; gap: 4px; align-items: baseline; justify-content: flex-end;
+  font-family: var(--pixel-font); font-size: 7px; letter-spacing: .5px;
+  color: var(--ink-soft); white-space: nowrap;
+}
+.oc i { font-style: normal; font-size: 8px; }
+.oc b { font-family: var(--pixel-font); font-size: 9px; color: var(--ink); min-width: 14px; text-align: right; }
+.oc.oc-zero b { color: var(--ink-soft); }
+.oc.pop { animation: oc-pop .35s ease; }
+@keyframes oc-pop { 40% { transform: scale(1.14); } }
+.oc-active b { color: var(--accent); }
+.oc-done b, .oc-done i { color: var(--green-ok); }
+.oc-err b, .oc-err i { color: var(--red-bad); }
+
+/* An error keeps its attention marker until the agent's next event —
+   a shake that ends after half a second gets missed in a busy room. */
+.bot.error .bot-tag { border-color: var(--red-bad); color: var(--red-bad); }
+.bot.error .sp-badge { background: var(--red-bad); }
+.roster-card.error { border-color: var(--red-bad); }
+.roster-card.error .roster-state { color: var(--red-bad); }
+
+/* Feed chips that open an agent's pane read as clickable. */
+.feed-chip.feed-chip-live { cursor: pointer; text-decoration: underline dotted rgba(61, 53, 41, 0); }
+.feed-chip.feed-chip-live::after { content: ' ↗'; font-size: 11px; }
+.feed-chip.feed-chip-live:hover { background: var(--accent-soft); }
+
+/* ═══════════════════════════════════════════════════════════════
+   PRINT PASS — the office as a drafting sheet
+
+   The theme already had the right instincts: hard pixel shadows, warm
+   paper, a room you look into. What it lacked was a point of view about
+   TYPE and SURFACE.
+
+   Three things were doing the "generated" look for it:
+   1. Press Start 2P at 6px. It is the default pixel face, and below 8px it
+      is mush. Silkscreen is drawn on an 8px em and its advance is ~0.75em,
+      so 8px Silkscreen is the same width per character as 6px Press Start
+      — identical layout, twice the legibility.
+   2. Cream + terracotta (this was #e0954f). That pairing is the first thing
+      every generated page reaches for. One madder ink (#a34a28) replaces
+      it; moss is the second ink; nothing else acts.
+   3. Every surface was a rounded box with a soft lift. Paper does not do
+      that: it has rules, dotted ledger lines, a double rule under a title,
+      and grain. So do these.
+
+   Skin only — no markup, no JS, no behaviour. Every animation added or
+   touched here is still neutralised by the global prefers-reduced-motion
+   block above.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ── 1. Type: an 8px grid, not a 6px squeeze ─────────────────── */
+
+.feed-chip,
+.data-table th,
+.tag,
+.icp-stat,
+.icp-goal,
+.fit-badge,
+.msg-label,
+.zone-label,
+.bot-tag,
+.review-label,
+.live-chip,
+.clock-chip,
+.queue-item .q-state,
+.agent-card-body h4,
+.roster-name,
+.roster-state,
+.add-skill-btn,
+.ctx-chip,
+.mode-chip,
+.vault-log-kind,
+.oc { font-size: 8px; }
+
+.data-card-title,
+.queue-head,
+.music-title,
+.sidebar-header,
+.status-panel-header,
+.add-skill summary,
+.agent-name,
+.skill-name,
+.vault-btn,
+.icp-stat b,
+.oc b { font-size: 10px; }
+
+.cmd-title b { font-size: 12px; }
+
+/* ── 2. The top bar is a masthead ────────────────────────────────
+   A wordmark sets the sheet; a double rule closes it. The mark is the
+   only decoration: one printed registration square, no badge behind the
+   name. */
+
+.topbar {
+  background: var(--paper);
+  border-radius: 2px;
+  padding: 4px 14px 8px;
+  position: relative;
+}
+.topbar::after {
+  content: '';
+  position: absolute;
+  left: 10px; right: 10px; bottom: 3px;
+  height: 3px;
+  border-top: 1px solid var(--ink);
+  border-bottom: 1px solid var(--ink);
+  opacity: .5;
+}
+.logo-chip {
+  background: transparent;
+  color: var(--ink);
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  text-shadow: none;
+  padding: 0;
+  margin-right: 2px;
+  font-size: 12px;
+  letter-spacing: 1.5px;
+}
+.logo-chip::before {
+  content: '';
+  display: inline-block;
+  width: 7px; height: 7px;
+  margin-right: 8px;
+  vertical-align: 1px;
+  background: var(--accent);
+}
+/* Match the clock chip's box height so the two sit on one optical line —
+   Silkscreen's glyphs ride high in their line box at 12px. */
+.logo-chip { line-height: 22px; }
+.dry-run-badge { border-radius: 2px; background: var(--amber-warn); color: #fdf6e6; }
+
+/* ── 3. The floor is a drafting sheet ────────────────────────────
+   12px fine grid, 60px major grid, and a light wash from the ceiling — the
+   sheet this business actually sells software for. No DOM, no JS. */
+
+.room {
+  border-radius: 2px;
+  background:
+    repeating-linear-gradient(0deg,  rgba(44,39,31,.05) 0 1px, transparent 1px 12px),
+    repeating-linear-gradient(90deg, rgba(44,39,31,.05) 0 1px, transparent 1px 12px),
+    repeating-linear-gradient(0deg,  rgba(44,39,31,.08) 0 1px, transparent 1px 60px),
+    repeating-linear-gradient(90deg, rgba(44,39,31,.08) 0 1px, transparent 1px 60px),
+    radial-gradient(120% 80% at 50% 0%, rgba(255,250,232,.85), transparent 62%),
+    linear-gradient(180deg, #ccd7b2, var(--moss-floor));
+}
+.wall-strip {
+  background: repeating-linear-gradient(90deg, #e6d9bd 0 46px, #d3c3a0 46px 48px);
+  border-radius: 0;
+}
+
+/* Zone labels read as pencilled annotations on the sheet, not buttons. */
+.zone-label {
+  background: rgba(250,243,227,.92);
+  border-color: var(--ink);
+  border-radius: 0;
+  color: var(--ink);
+}
+.station.active .zone-label { color: #fdf6e6; }
+
+/* ── 4. Messages are ledger slips ────────────────────────────────
+   A 4px ink margin rule instead of a chat bubble; the tail radius goes. */
+
+.msg-content {
+  background: #fbf6e8;
+  border-radius: 2px;
+  border-color: var(--ink);
+  box-shadow: 2px 2px 0 rgba(44,39,31,.12);
+  padding: 7px 10px 7px 12px;
+  position: relative;
+}
+.msg-content::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 4px;
+  background: var(--moss-deep);
+}
+.message-user .msg-content { border-bottom-right-radius: 2px; }
+.message-jarvis .msg-content { border-bottom-left-radius: 2px; }
+.message-user .msg-content::before { background: var(--accent); }
+.message-progress .msg-content::before,
+.message-system .msg-content::before { background: var(--line-warm); }
+
+/* ── 5. Tables are printed, not carded ───────────────────────────
+   Double rule under the title, solid rule under the header, dotted
+   ledger lines between rows. */
+
+.data-card {
+  background: #fbf6e8;
+  border-radius: 2px;
+  box-shadow: 2px 2px 0 rgba(44,39,31,.12);
+}
+.data-card-title {
+  border-bottom: 3px double var(--ink);
+  padding-bottom: 4px;
+  margin-bottom: 8px;
+  letter-spacing: .5px;
+}
+.data-table th {
+  border-bottom: 2px solid var(--ink);
+  color: var(--ink);
+  letter-spacing: .5px;
+}
+.data-table td { border-bottom: 1px dotted var(--line-warm); }
+.data-table tr:nth-child(even) td { background: rgba(44,39,31,.035); }
+.icp-bar { border-bottom: 1px solid var(--ink); }
+
+/* ── 6. Labels, not pills ────────────────────────────────────────
+   999px radius on every small control is the giveaway. Square them and let
+   the ink border do the work; chips get a heavier bottom edge so they read
+   as something pressed onto the page. */
+
+.chip,
+.station-btn,
+.clock-chip,
+.icp-type,
+.conn,
+.icon-btn,
+.goal-chip,
+.agent-chip,
+.btn,
+.review-btn,
+.vault-btn,
+.composer-send,
+.composer-tool,
+.roster-card,
+.roster-ava,
+.conv-del,
+.add-skill-btn { border-radius: 2px; }
+
+.chip {
+  background: var(--paper);
+  border-bottom-width: 3px;
+}
+.station-btn { background: var(--paper); }
+
+/* ── 7. Paper grain ──────────────────────────────────────────────
+   One grey noise tile, low opacity, on the big flat surfaces only. It is
+   what separates "a div with a background colour" from a printed sheet.
+   Data URI counts as an image, which the CSP already allows. */
+
+:root {
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23g)' opacity='0.13'/%3E%3C/svg%3E");
+}
+
+.cmd,
+.roster-strip,
+.topbar,
+.status-panel,
+.sidebar,
+.music-corner {
+  background-image:
+    var(--grain),
+    linear-gradient(180deg, rgba(255,255,255,.5), rgba(255,255,255,0) 44%);
+}
+.data-card,
+.msg-content,
+.agent-card,
+.skill-card,
+.conv-item { background-image: var(--grain); }
+.agent-card,
+.skill-card,
+.conv-item { background-color: #fbf6e8; }
+.roster-card {
+  background-image: var(--grain), linear-gradient(180deg, #fffdf3, #f4ecda);
+}
+
+/* ── 8. Composer + buttons ───────────────────────────────────────
+   The composer is a form field on the sheet, not a floating search bar. */
+
+.composer-box {
+  background: #fbf6e8;
+  border-radius: 2px;
+  padding-left: 10px;
+}
+.btn-primary { background: var(--accent); }
+.btn-primary:hover { background: var(--moss-deep); }
+
+/* ── 9. The office feed is a ticker ──────────────────────────────
+   A rule across the sheet's foot instead of another floating card. */
+
+.ops-feed {
+  border-radius: 0;
+  border-width: 2px 0 0;
+  background: rgba(250,243,227,.94);
+  padding: 4px 4px 2px;
+}
+
+/* ── 10. Small print worth getting right ─────────────────────── */
+
+::selection { background: var(--accent-soft); color: var(--ink); }
+.roster-bar { border-radius: 0; }
+.tag, .fit-badge, .icp-stat, .icp-goal { border-radius: 2px; }
+.bot-bubble { border-radius: 2px; box-shadow: 2px 2px 0 rgba(44,39,31,.2); }
+.skill-owner { border-radius: 2px; }
+
+/* ── 11. Floor props + masthead alignment ────────────────────────
+   The rug was a dashed empty rectangle; once a drafting grid sits under it
+   that reads as a selection marquee. It is a woven mat now. */
+
+.rug {
+  border: 2px solid var(--wood-deep);
+  border-radius: 2px;
+  background:
+    repeating-linear-gradient(45deg, rgba(133,96,59,.12) 0 6px, transparent 6px 12px),
+    rgba(189,139,86,.16);
+}
+
+/* One row, one baseline: the wordmark and the clock were set on different
+   baselines, which read as a masthead that had slipped. */
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.topbar-left .topbar-note,
+.topbar-left .clock-chip { margin-left: 0; }
+.topbar-note {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DECLUTTER PASS — 2026-11-14
+   Reference picked: the Health Monitoring Dashboard's TWO-COLUMN SHELL —
+   one narrow living column (the office floor) beside one wide work surface
+   (the command center), a short row of metric cards at the top of the main
+   column, generous space, a single accent, and controls that never clip
+   against their container's corners. This block overrides the skins above;
+   ids, classes, the splitter contract and every API stay unchanged.
+   ═══════════════════════════════════════════════════════════════ */
+
+/* A hidden panel is hidden even when a skin gave it display:flex. */
+[hidden] { display: none !important; }
+
+/* ── 1. Shell: narrow office, wide workspace ─────────────────── */
+.app {
+  padding: 12px;
+  gap: 12px;
+  /* Wider main column than before (was 1.35fr/1fr): the chat + review card is
+     where work actually happens, so it gets the space the reference gives its
+     dashboard. The splitter still writes --floor-cols on drag. */
+  grid-template-columns: var(--floor-cols, minmax(300px, 0.9fr) 0px minmax(420px, 1.55fr));
+}
+
+/* ── 2. Top bar: flat chrome, one labelled menu ──────────────── */
+.topbar {
+  border: 0;
+  background: transparent;
+  padding: 0 2px;
+  min-height: 34px;
+}
+.logo-chip {
+  background: transparent;
+  color: var(--ink);
+  border: 0;
+  padding: 0 8px 0 0;
+  font-size: 12px;
+}
+.logo-chip::before { width: 9px; height: 9px; }
+
+.topbar-menu { position: relative; }
+.menu-btn {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--body-font);
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 2px solid var(--line-warm);
+  border-radius: 999px;
+  padding: 4px 12px 4px 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.menu-btn::-webkit-details-marker { display: none; }
+.menu-btn::marker { content: ''; }
+.menu-btn:hover { border-color: var(--ink); background: var(--paper-deep); }
+.topbar-menu[open] .menu-btn {
+  background: var(--ink);
+  color: var(--panel);
+  border-color: var(--ink);
+}
+
+.menu-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 80;
+  width: 252px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--panel);
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  box-shadow: 0 14px 30px rgba(44, 39, 31, .22);
+  /* The radius belongs to the panel, not to the first/last row: rows keep
+     their own rounded hover without being clipped by the container. */
+  overflow: hidden;
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  max-width: none;
+  text-align: left;
+  font-family: var(--body-font);
+  font-size: 16px;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  padding: 8px 9px;
+  cursor: pointer;
+}
+.menu-item:hover { background: var(--paper-deep); }
+.menu-item em {
+  margin-left: auto;
+  font-style: normal;
+  font-size: 12px;
+  letter-spacing: .3px;
+  color: var(--ink-soft);
+}
+.menu-item#goalChip { border: 0; background: transparent; padding: 8px 9px; }
+.menu-item#goalChip:hover { background: var(--paper-deep); }
+
+/* ── 3. Command center: one card, quiet chrome ───────────────── */
+.cmd {
+  border: 2px solid var(--ink);
+  border-radius: 14px;
+  background: #fbf7ec;
+}
+.cmd-head {
+  border-bottom: 0;
+  background: transparent;
+  padding: 14px 18px 6px;
+}
+.tabs {
+  border-bottom: 0;
+  background: transparent;
+  padding: 2px 18px 10px;
+  gap: 4px;
+}
+.tabs .tab {
+  border: 1px solid var(--line-warm);
+  border-radius: 999px;
+  background: transparent;
+  padding: 4px 13px;
+  top: 0;
+  color: var(--ink-soft);
+}
+.tabs .tab.is-active {
+  background: var(--ink);
+  color: var(--panel);
+  border-color: var(--ink);
+  top: 0;
+  padding-bottom: 4px;
+}
+
+/* Metric cards — three numbers, one label each, no borders-on-borders. */
+.metric-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  padding: 2px 18px 12px;
+  border-bottom: 0;
+  background: transparent;
+  white-space: normal;
+  overflow: visible;
+}
+.metric-card {
+  min-width: 0;
+  background: #fffdf5;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+.metric-card b {
+  display: block;
+  font-family: var(--pixel-font);
+  font-size: 15px;
+  line-height: 1.35;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.metric-card span {
+  display: block;
+  font-size: 12px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+/* ── 4. Chat: air, then a three-chip row ─────────────────────── */
+.messages { padding: 4px 18px 10px; gap: 12px; }
+.quick-chips {
+  border-top: 0;
+  padding: 2px 18px 8px;
+  gap: 7px;
+  align-items: center;
+}
+.chips-more { position: relative; }
+.chips-more > summary { list-style: none; }
+.chips-more > summary::-webkit-details-marker { display: none; }
+.chips-more > summary::marker { content: ''; }
+.chips-more-list {
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 8px);
+  z-index: 40;
+  min-width: 156px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 6px;
+  background: var(--panel);
+  border: 2px solid var(--ink);
+  border-radius: 12px;
+  box-shadow: 0 14px 30px rgba(44, 39, 31, .2);
+}
+.chips-more-list .chip { width: 100%; text-align: left; }
+
+.composer { padding: 0 18px 14px; }
+.composer-box {
+  border-width: 2px;
+  border-radius: 12px;
+  padding: 4px 6px 4px 14px;
+}
+
+/* ── 5. Floor: ten desks on one strict lattice ──────────────── */
+.floor, .room { border-radius: 14px; }
+.room .station { transform: translateX(-50%); }
+.station-scout      { left: 10%; top: 25%; }
+.station-analyst    { left: 30%; top: 25%; }
+.station-scraper    { left: 50%; top: 25%; }
+.station-enricher   { left: 70%; top: 25%; }
+.station-builder    { left: 90%; top: 25%; }
+.station-strategist { left: 10%; top: 63%; }
+.station-drafts     { left: 30%; top: 63%; }
+.station-sent       { left: 50%; top: 63%; }
+.station-mailer     { left: 70%; top: 63%; }
+.station-brain      { left: 90%; top: 63%; }
+
+/* One label, one count. The count is the number of agents whose home desk
+   this is — the same projection the bots walk from. */
+.zone-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border: 1px solid var(--line-warm);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink-soft);
+  font-size: 7px;
+}
+.zone-count {
+  font-family: var(--pixel-font);
+  font-size: 6px;
+  line-height: 1;
+  min-width: 13px;
+  padding: 3px 4px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--panel);
+  text-align: center;
+}
+.zone-count.is-zero { background: var(--paper-deep); color: var(--ink-soft); }
+.station.active .zone-count { background: var(--panel); color: var(--accent); }
+
+/* ── 6. Telemetry that has nothing to say takes no space ────── */
+.roster-strip { border-radius: 14px; border-width: 2px; padding: 6px; overflow: hidden; }
+.roster-strip.is-empty { display: none; }
+.roster-counters.is-empty { display: none; }
+.ops-feed { border-radius: 0 0 11px 11px; }
+.ops-feed.is-idle { display: none; }
+
+/* ── 7. Email review: the whole pane, one tall body ─────────── */
+.cmd.is-reviewing .metric-row,
+.cmd.is-reviewing .quick-chips,
+.cmd.is-reviewing #queuePanel { display: none !important; }
+.cmd.is-reviewing #messages {
+  padding: 6px 14px 12px;
+  overflow: hidden;
+}
+.cmd.is-reviewing #messages > .message:not(#reviewCard) { display: none; }
+.cmd.is-reviewing #reviewCard {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.cmd.is-reviewing #reviewCard .review-card {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px 12px;
+  border-radius: 10px;
+  overflow: hidden;
+}
+#reviewCard .review-biz { flex: none; }
+#reviewCard .review-field { flex: none; margin-top: 8px; }
+#reviewCard .review-field-to input,
+#reviewCard .review-field-subject input { width: 100%; }
+#reviewCard .review-field-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+#reviewCard .review-field-body textarea {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+  resize: none;
+}
+#reviewCard .review-actions {
+  position: static;
+  flex: none;
+  margin-top: 10px;
+  padding: 10px 0 0;
+  background: transparent;
+}
+#reviewCard .review-btn { border-radius: 999px; padding: 6px 16px; }
+
+/* ── 9. Hired desks exist only while someone sits at one ────── */
+.station-hired.is-empty { display: none; }
+
+/* ── 10. The secondary actions live under the composer ──────── */
+.composer-meta .chips-more { position: relative; }
+.composer-meta .chips-more > summary { list-style: none; }
+.composer-meta .chips-more > summary::-webkit-details-marker { display: none; }
+.composer-meta .chips-more > summary::marker { content: ''; }
+.composer-meta .chips-more-list {
+  left: auto;
+  right: 0;
+  bottom: calc(100% + 10px);
+  min-width: 150px;
+}
+.chip-more { padding: 2px 8px; font-size: 13px; }
+.chip-more span { margin-left: 2px; }
+
+/* ── 11. Stacked layout: two desk rows that fit, chat keeps its room ── */
+/* (appended at the end of the sheet so it wins over section 8) */
+
+/* ── 8. Narrower windows keep the same hierarchy ────────────── */
+@media (max-width: 900px) {
+  .app { padding: 8px; gap: 8px; }
+  .cmd-head { padding: 10px 12px 4px; }
+  .tabs { padding: 2px 12px 8px; }
+  .metric-row { padding: 2px 12px 10px; gap: 8px; }
+  .metric-card { padding: 6px 9px; }
+  .metric-card b { font-size: 13px; }
+  .messages, .quick-chips { padding-left: 12px; padding-right: 12px; }
+  .composer { padding: 0 12px 10px; }
+  .cmd.is-reviewing #messages { padding: 4px 8px 8px; }
+}
+
+@media (max-width: 600px) {
+  .app { padding: 6px; gap: 6px; }
+  .metric-row { gap: 6px; }
+  .metric-card span { font-size: 10px; }
+  .menu-list { width: 218px; }
+  .zone-label { font-size: 6px; gap: 4px; }
+}
+
+/* ── Stacked layout, final word: two desk rows that fit the room and a
+      message list the composer cannot starve. ───────────────────── */
+@media (max-width: 900px) {
+  .app { grid-template-rows: auto minmax(132px, 20vh) minmax(0, 1fr) auto; }
+  .station-scout,
+  .station-analyst,
+  .station-scraper,
+  .station-enricher,
+  .station-builder { top: 10%; }
+  .station-strategist,
+  .station-drafts,
+  .station-sent,
+  .station-mailer,
+  .station-brain { top: 32%; }
+  .cmd-head { padding: 8px 12px 2px; }
+  .cmd-ava { width: 26px; height: 26px; }
+  .tabs { padding: 0 12px 6px; }
+  .metric-row { padding: 0 12px 8px; }
+  .messages { min-height: 84px; }
+  .composer { padding: 0 12px 10px; }
+  /* The keyboard hint was the longest line in this column; here it wrapped to
+     three lines and ate the message list. Context and mode stay. */
+  .composer-hint { display: none; }
+  .composer-foot { justify-content: flex-end; }
+}
+
+@media (max-width: 640px) {
+  /* Three chips have to stay on one line: the row is the primary action bar,
+     and a wrapped "research" chip reads as a broken layout. */
+  .quick-chips { gap: 5px; }
+  .chip { font-size: 13px; padding: 2px 8px; }
+  .chip-more span { display: none; }
+  #reviewCard .review-btn { padding: 5px 11px; font-size: 13px; }
+}
+
+

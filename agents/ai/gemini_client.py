@@ -47,6 +47,12 @@ def _call_with_retry(client, types, model, contents, config):
     A 429 tells us how long to wait; a 5xx blip gets a short backoff. Anything
     else is not retryable and is raised on the first attempt.
     """
+    from agents.config import is_dry_run
+    if is_dry_run():
+        class MockResp:
+            text = "DRY RUN GEMINI"
+            candidates = []
+        return MockResp()
     last_err = None
     for attempt in range(_MAX_ATTEMPTS):
         try:

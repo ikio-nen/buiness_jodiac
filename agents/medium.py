@@ -23,13 +23,13 @@ from .base import BaseAgent, Complexity, Task
 
 HOOKS_BY_GOAL = {
     "cad_licensing": {
-        "training": "How does {biz} license the software when a new batch starts? We supply genuine {product} seat by seat, so a CAD batch can start the moment students enrol.",
+        "training": "I looked at {biz}'s courses, and starting a new CAD batch usually means full retail pricing doesn't fit standard batch margins when every student needs licensed software from day one.",
         "college": "Does {biz} license a seat for every lab machine, or just the main lab? We quote the whole department at education pricing.",
         "polytechnic": "Across {biz}'s trades, how many drafting seats are being licensed this year? We can cover all of them on one quotation.",
         "school": "If {biz} runs a computer stream, keeping those lab machines on real licences is the usual headache. We cover a whole classroom at per-lab pricing.",
         "university": "How does {biz} manage licences across departments? We handle volume licensing and the compliance paperwork that comes with it.",
         "computer": "How is the lab at {biz} licensed for software the students actually need? We supply genuine {product} for the machines you already have.",
-        "*": "Most institutes we work with were running trial software until it expired mid-session. For {biz}, we would supply genuine {product} licensed for every machine in the lab.",
+        "*": "I looked at {biz}'s courses and lab setup. We help institutes get {product} at per-seat institute pricing so new student batches are covered from day one.",
     },
     "website": {
         "school": "Parents compare {biz} with three other institutes before they ever call. We build the site that makes that comparison come out in your favour.",
@@ -50,24 +50,24 @@ HOOKS_BY_GOAL = {
 
 SUBJECTS_BY_GOAL = {
     "cad_licensing": (
-        "{product} for {biz}'s lab",
-        "Licensed {product} - institutional pricing",
-        "Quick question about {biz}'s computer lab",
-        "Genuine {product} for {biz}",
-        "5-min chat about lab licensing at {biz}?",
+        "Licensed AutoCAD seats for {biz}",
+        "Licensed AutoCAD seats for {biz}'s student batches",
+        "Per-seat AutoCAD licensing for {biz}",
+        "Institutional AutoCAD licensing for {biz}",
+        "Licensing question for {biz}'s next batch",
     ),
     "website": (
         "A website for {biz}",
         "Quick idea for {biz}'s online presence",
         "Found {biz} online - a thought on your site",
         "{biz} + a modern website = more enquiries",
-        "5-min chat about {biz}'s website?",
+        "A thought on {biz}'s website",
     ),
     "custom": (
         "{product} for {biz}",
         "Quick idea for {biz}",
         "Saw {biz} - had an idea to share",
-        "5-min chat about {product}?",
+        "An idea about {product} for {biz}",
     ),
 }
 
@@ -131,7 +131,10 @@ class MediumAgent(BaseAgent):
         biz_name = _safe(payload.get("business_name", "your business"))
         contact_name = _safe(payload.get("contact_name", ""))
         category = payload.get("category", "")
-        sender_name = ctx.get("sender_name", "the team")
+        from . import email_copy
+        from .config import get_business_context, get_sender_name, get_whatsapp_number
+        sender_name = ctx.get("sender_name") or get_sender_name() or email_copy.SENDER
+        whatsapp = get_whatsapp_number() or email_copy.WHATSAPP
         tone = payload.get("tone", "professional")
 
         # What this search sells drives every line of copy below. The goal is
@@ -141,12 +144,11 @@ class MediumAgent(BaseAgent):
         goal = resolve_goal(explicit=payload.get("goal", ""))
         product = product_line(goal)
 
-        greeting = f"Hi {contact_name}," if contact_name else f"Hi there,"
-
         # Vertical hook, enhanced by learning context if we have any.
         template = (HOOKS_BY_GOAL.get(goal["key"]) or HOOKS_BY_GOAL["custom"])
         raw = template.get(category) or template["*"]
         hook = raw.format(biz=biz_name, product=product)
+        researched = ""
         learning_ctx = payload.get("learning_context", "")
         if learning_ctx:
             # First try: research-specific hook ("Suggested opening: ...")
@@ -155,6 +157,7 @@ class MediumAgent(BaseAgent):
                     research_hook = line.split(":", 1)[1].strip()
                     if len(research_hook) > 10:
                         hook = research_hook
+                        researched = research_hook
                         break
             # Second try: learned hooks from past sessions
             if hook == raw.format(biz=biz_name, product=product) and "best hooks" in learning_ctx:
@@ -194,33 +197,56 @@ class MediumAgent(BaseAgent):
             memory_lines.append(f"One thing I noticed: {first_gap.lower()} - that's exactly what we help with.")
         memory_section = ("\n" + "\n".join(memory_lines) + "\n") if memory_lines else ""
 
-        cta = "Would you be open to a quick 5-minute chat this week?"
-        if brain_facts.get("last interaction", "").startswith("emailed"):
-            cta = "I reached out recently and wanted to follow up - would a quick 5-minute chat this week work?"
-
         # Get industry pain points for a more relevant email
         from .industry_learner import get_or_research_industry
         industry = get_or_research_industry(category, product=product)
         pain_point = industry.get("pain_points", [""])[0] if industry.get("pain_points") else ""
         pain_section = f"\nI understand that {pain_point.lower()}" if pain_point else ""
 
-        body = f"""{greeting}
+        if goal.get("key") == "cad_licensing":
+            # Issue-first, then the fixed copy deck. The researched opening is
+            # preferred; otherwise a category-level issue is used and labelled
+            # in the draft metadata by the caller's contract.
+            greeting = email_copy.greeting_for(contact_name, biz_name)
+            if researched:
+                issue = researched if researched.endswith((".", "!", "?")) else researched + "."
+                issue_basis = "specific"
+                issue_evidence = researched
+                issue_note = ""
+            else:
+                issue = email_copy.issue_line(biz_name, category)
+                issue_basis = "category-level"
+                issue_evidence = f"Public listing for {biz_name} ({category or 'institution'})."
+                issue_note = email_copy.CATEGORY_LEVEL_NOTE.format(
+                    issue=category or "institution type")
+            body = email_copy.compose_body(
+                issue, greeting=greeting, sender=sender_name, whatsapp=whatsapp)
+            extra_meta = {
+                "issue_basis": issue_basis,
+                "issue_evidence": issue_evidence,
+            }
+            if issue_note:
+                extra_meta["issue_note"] = issue_note
+        else:
+            greeting = email_copy.greeting_for(contact_name, biz_name)
+            body = f"""{greeting}
 
 {hook}{pain_section}
 
 We supply {product} for institutions. {value_prop}{memory_section}
-{cta}
+{email_copy.cta(whatsapp)}
 
-Best,
-{sender_name}"""
+{email_copy.sign_off(sender_name, whatsapp)}"""
+            extra_meta = {}
 
         return {
             "to": payload.get("email", ""),
-            "subject": self._generate_subject({"business_name": biz_name, "category": category}, ctx)["subject"],
+            "subject": self._generate_subject({"business_name": biz_name, "category": category, "goal": goal.get("key")}, ctx)["subject"],
             "body": body.strip(),
             "greeting": greeting,
             "hook": hook,
             "tone": tone,
+            **extra_meta,
         }
 
     def _generate_subject(self, payload: dict, ctx: dict) -> dict:
@@ -245,6 +271,9 @@ Best,
 
     def _enrich_hunter(self, payload: dict, ctx: dict) -> dict:
         """Look up emails for a business domain via Hunter.io."""
+        from .config import is_dry_run
+        if is_dry_run():
+            return {"email": "dryrun@example.com", "first_name": "Dry", "last_name": "Run", "position": "Owner", "dry_run": True}
         domain = payload.get("domain", "")
         if not domain:
             return {"error": "No domain provided"}

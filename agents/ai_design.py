@@ -44,7 +44,10 @@ class AIDesignAgent(BaseAgent):
         handler = handlers.get(task.name)
         if handler is None:
             raise ValueError(f"AIDesignAgent has no handler for '{task.name}'")
-        return handler(task.payload, task.context)
+        try:
+            return handler(task.payload, task.context)
+        except Exception:
+            return self._fallback(task)
 
     def _fallback(self, task: Task) -> dict:
         """Fall back to template agents when Gemini is unavailable."""
@@ -140,19 +143,31 @@ Business details:
     def _draft_email(self, payload: dict, ctx: dict) -> dict:
         """Draft one email with every context layer we have.
 
+        The specification lives in ``agents/ai/prompts/draft_email.md`` (loaded
+        here, filled from the copy deck) so a copy change is one diff. The
+        greeting and the fixed offer/flyer/CTA/sign-off blocks are applied by
+        this method, never left to the model to paraphrase.
+
         Raises on failure so the orchestrator's ai_* -> template fallback
         engages -- returning an {"error": ...} dict would flow into the
         drafts list as a fake success (handle() marks any dict a success).
         """
         from . import ai_engine
+        from .ai import prompts as prompt_files
+        from . import email_copy
 
         biz_name = payload.get("business_name", "the business")
         contact_name = payload.get("contact_name", "")
         category = payload.get("category", "")
-        sender_name = ctx.get("sender_name", "The Team")
-
-        from .config import get_business_context, get_email_tone
+        from .config import get_business_context, get_email_tone, get_sender_name, get_whatsapp_number
+        sender_name = ctx.get("sender_name") or get_sender_name() or email_copy.SENDER
+        whatsapp = get_whatsapp_number() or email_copy.WHATSAPP
         tone = get_email_tone() or "professional"
+
+        # A person's name when research supplied one, otherwise the
+        # institution's own name — never an invented contact, and no longer a
+        # generic "Dear Team" when we know exactly who we are writing to.
+        greeting = email_copy.greeting_for(contact_name, biz_name)
 
         # Learning context: research + brain memory, assembled by the workflow
         # with clear section markers.
@@ -206,23 +221,57 @@ Business details:
         if web_snippet:
             web_section = f"\n\nRecent public web results about them:\n{web_snippet}\nUse anything concrete (news, reputation, offerings) -- ignore anything irrelevant."
 
-        prompt = f"""Write a short, professional cold-outreach email to {contact_name or 'a business owner'} at {biz_name} ({category} business).
+        # The specification is a versioned file, not an inline prompt. Fill its
+        # tokens from the copy deck so prompt and template paths cannot drift.
+        _version, spec = prompt_files.load("draft_email")
+        tokens = {
+            "{{GREETING}}": greeting,
+            "{{SENDER}}": sender_name,
+            "{{WHATSAPP}}": whatsapp,
+            "{{ACTIVATION}}": email_copy.ACTIVATION_PHONE,
+            "{{OFFER}}": email_copy.OFFER,
+            "{{FLYER_LINE}}": email_copy.FLYER_LINE,
+            "{{CTA}}": email_copy.cta(whatsapp),
+            "{{SIGN_OFF}}": email_copy.sign_off(sender_name, whatsapp),
+        }
+        for token, value in tokens.items():
+            spec = spec.replace(token, value)
 
-Goal: sell {product} to them, this search. Keep it:
-- Under 150 words
-- {tone} tone
-- One clear call to action (quick 5-min chat)
-- Specific to what we sell on this search ({product}) and why THIS business needs it
-- Reference what we actually sell and why they need it{profile_section}{industry_section}{icp_section}{learning_section}{web_section}
+        prompt = f"""{spec}
 
-From: {sender_name}
+## This email
+- Institution: {biz_name}
+- Contact name from research: {contact_name or 'none -- address the institution by name'}
+- Institution type: {category}
+- Product on this search: {product}
+- Tone: {tone}
 
-Return ONLY a JSON object with these keys:
-{{"subject": "...", "body": "...", "greeting": "...", "hook": "..."}}"""
+Context about this business & goal:{profile_section}{industry_section}{icp_section}{learning_section}{web_section}"""
 
         result = ai_engine.generate_json(prompt)
-        if not (result and result.get("subject") and result.get("body")):
+        if not (result and result.get("subject")):
             raise ValueError("AI email generation failed: empty or malformed response")
+
+        # Keep the model's researched issue; compose the rest deterministically
+        # so the offer, flyer line, CTA and sign-off are byte-exact every time.
+        issue = str(result.get("issue") or "").strip()
+        if not issue:
+            text = str(result.get("body") or "").strip()
+            if text.lower().startswith(greeting.lower()):
+                text = text[len(greeting):].strip()
+            issue = text.split("\n\n")[0].strip()
+        if not issue:
+            raise ValueError("AI email generation failed: no issue paragraph")
+
+        result["greeting"] = greeting
+        result["hook"] = str(result.get("hook") or issue.split(". ")[0].rstrip(".") + ".").strip()
+        result["body"] = email_copy.compose_body(
+            issue, greeting=greeting, sender=sender_name, whatsapp=whatsapp)
+        result.setdefault("issue_basis", "category-level")
+        result.setdefault("issue_evidence", "")
+        if result["issue_basis"] == "category-level" and not result.get("issue_note"):
+            result["issue_note"] = email_copy.CATEGORY_LEVEL_NOTE.format(
+                issue=category or "institution type")
 
         result["to"] = payload.get("email", "")
         result["ai_powered"] = True

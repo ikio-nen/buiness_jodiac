@@ -100,8 +100,8 @@ class GeminiService:
         the drafting agent; the typed models wrap the result.
         """
         version, _ = prompts.load("draft_email")
-        from agents.ai_design import AIEmailDesigner
-        designer = AIEmailDesigner()
+        from agents.ai_design import AIDesignAgent
+        designer = AIDesignAgent()
         try:
             raw = designer._draft_email(payload, ctx)
         except Exception as e:

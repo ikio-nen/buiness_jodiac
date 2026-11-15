@@ -122,6 +122,18 @@ PROVIDER_PRESETS: dict[str, dict] = {
         "note": "KEYLESS anonymous tier; unofficial uptime, weak tool calling",
     },
     # ── legacy (kept so old configs keep working) ──
+    "opencode": {
+        "base": "https://api.opencode.ai/v1",
+        "model": "glm-4.7-flash",
+        "needs_key": True,
+        "note": "OpenCode AI provider (OpenAI-compatible)",
+    },
+    "vercel": {
+        "base": "https://ai-gateway.vercel.sh/v1",
+        "model": "",
+        "needs_key": True,
+        "note": "Vercel AI provider / gateway",
+    },
     "ollama": {
         "base": "http://127.0.0.1:11434/v1",
         "model": "",
@@ -229,7 +241,17 @@ def _timeout_for(name: str) -> int:
 def _post_to(provider: str, path: str, payload: dict) -> dict:
     """One POST to one provider. Raises _SkipProvider on retryable-across-
     providers failures, RuntimeError on request-shape 4xx."""
+    from agents.config import is_dry_run
+    if is_dry_run():
+        return {
+            "choices": [{
+                "message": {"role": "assistant", "content": "DRY RUN PROVIDER RESPONSE"}
+            }],
+            "usage": {"total_tokens": 0}
+        }
     key = _provider_key(provider)
+    if _preset(provider).get("needs_key", True) and not key:
+        raise _SkipProvider(f"{provider}: no API key configured")
     headers = {"Content-Type": "application/json",
                # urllib's default "Python-urllib/3.x" UA is banned by Cloudflare
                # (HTTP 403 error 1010) on several gateways — any named UA passes.

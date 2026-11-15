@@ -1,35 +1,62 @@
-# Data roots (JODIAC_HOME points here; config.json with API keys lives inside)
+# Data roots
 jodiac_data/
 agent_output/
 output/
+_backups/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+config.json
+vault.json
+.vault_key
+*.vault_key
+contact_cache.json
+*.bak*
+*.key
+*.pem
+*.pfx
+*.p12
+credentials.json
+service_account.json
+service-account*.json
+
+# Databases
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
 
 # Python
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*$py.class
 *.egg-info/
 dist/
 build/
+.pytest_cache/
 
-# IDE
+# IDE & OS
 .vscode/
 .idea/
-
-# OS
 .DS_Store
 Thumbs.db
 
-# Temp / logs
+# Temp & logs
 *.tmp
 *.log
 *.log.err
 .freebuff/
 .freebuffpreview-*
 
-# Scratch / runtime artifacts (probe dumps, server pids, screenshots)
+# Scratch & runtime artifacts
 _*.txt
 _*.json
 _*.bat
 server.pid
 server_pid.txt
 /*.png
+playtest_screenshots/

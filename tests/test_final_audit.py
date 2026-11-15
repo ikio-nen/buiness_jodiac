@@ -175,9 +175,10 @@ try:
                context={'sender_name': 'The Team'})
     with mock.patch('agents.ai_engine.generate_json', return_value={}):
         r = ai_agent.handle(bad)
-        # _draft_email must RAISE (so handle() reports failure), not return
-        # an {"error": ...} dict that would pass as a fake success.
-        assert not r.success, 'ai_draft_email should fail when AI output is empty'
+        # Template fallback now handles empty AI output gracefully and produces a draft
+        assert r.success, 'ai_draft_email should succeed via template fallback when AI output is empty'
+        assert r.output.get('body'), 'fallback draft has no body'
+        assert 'Fallback Co' in r.output['body']
     # Orchestrator-level fallback: with AI 'unavailable', run() must land on
     # the template drafter, not return an empty draft.
     o3 = Orchestrator()
@@ -353,3 +354,5 @@ for k, v in results.items():
 
 fails = sum(1 for v in results.values() if v.startswith('FAIL'))
 print(f'\nTotal: {len(results)} checks, {len(results)-fails} passed, {fails} failed')
+if fails:
+    sys.exit(1)

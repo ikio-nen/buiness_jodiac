@@ -17,6 +17,22 @@ import pytest
 from agents.outbox.ledger import Ledger
 
 
+# These suites are runnable scripts, not pytest modules: they execute their
+# checks at import time and call sys.exit(). While they lived in agents/ pytest
+# never collected them; now that every suite sits in tests/, one SystemExit at
+# import aborts the whole session (INTERNALERROR) and test_ledger's tests never
+# run. They stay runnable directly: `python -X utf8 tests/<name>.py`.
+collect_ignore = [
+    "test_category_exclusions.py",
+    "test_contact_enricher.py",
+    "test_db.py",
+    "test_final_audit.py",
+    "test_goal_state.py",
+    "test_outreach_apis.py",
+    "test_provider_cascade.py",
+]
+
+
 @pytest.fixture
 def outbox_dir(tmp_path: Path) -> Path:
     """A fresh, real directory a Ledger can own."""

@@ -66,6 +66,31 @@ def _frame_sender(websocket: WebSocket):
 @router.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket for real-time chat with JARVIS."""
+    # Validate Host and Origin headers
+    ALLOWED_WS_ORIGINS = {"http://127.0.0.1:8765", "http://localhost:8765"}
+    ALLOWED_WS_HOSTS = {"127.0.0.1:8765", "localhost:8765", "127.0.0.1", "localhost", "testserver"}
+
+    host = websocket.headers.get("host", "").split(",")[0].strip()
+    if host and host not in ALLOWED_WS_HOSTS:
+        await websocket.close(code=1008, reason=f"Invalid Host: {host}")
+        return
+
+    origin = websocket.headers.get("origin")
+    if origin and origin not in ALLOWED_WS_ORIGINS:
+        await websocket.close(code=1008, reason=f"Rejected Origin: {origin}")
+        return
+
+    # Validate the launch token: header, Bearer, the launch cookie (what a
+    # browser sends on the handshake), or an explicit query param kept for
+    # scripted clients. The cookie is the normal path — the page never sees
+    # the token, so it has nothing to put in a URL or a header.
+    from agents.web.auth import request_token
+    token = request_token(websocket.headers, websocket.cookies,
+                          websocket.query_params.get("token", ""))
+    if not token:
+        await websocket.close(code=1008, reason="Unauthorized: valid auth token required")
+        return
+
     await websocket.accept()
     ws_id = id(websocket)
     send = _frame_sender(websocket)

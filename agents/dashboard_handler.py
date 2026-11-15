@@ -108,5 +108,6 @@ def run_learning_dashboard():
         p(f"  Gemini AI:   {C.YELLOW}OFFLINE{C.RESET} (using templates)")
         p(f"  Tip: Press [S] to configure Gemini API key", C.DIM)
 
-    print(f"\n  {C.DIM}Knowledge base: F:/jodiac/agent_output/knowledge_base/{C.RESET}")
+    from agents.config import KB_DIR
+    print(f"\n  {C.DIM}Knowledge base: {KB_DIR}{C.RESET}")
     print(f"  {C.DIM}Data improves with each outreach session.{C.RESET}")

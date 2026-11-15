@@ -73,15 +73,38 @@ async def run_action(action, send, session, memory, ws_id=None):
         await campaign_ui.begin(send, memory, ws_id, checklist)
 
 
+def _count(value, fallback: int = 0) -> int:
+    """Coerce a count that may arrive as an int or as the LIST it counts.
+
+    action_dispatch's payload carries ints (len(no_site)), while the raw
+    pipeline report carries lists under the same names. A shape assumption here
+    once took out the whole result frame — len() on an int raises TypeError, the
+    socket reports "object of type 'int' has no len()", and the search card
+    never renders even though the search itself succeeded.
+    """
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, (list, tuple, dict, set)):
+        return len(value)
+    return fallback
+
+
 def shape_result(at: str, data: dict):
     """Convert an action_dispatch result into the renderer payloads the
     front-end already understands."""
     if at == "search":
-        businesses = data.get("businesses", [])
+        businesses = data.get("businesses") or []
+        total = _count(data.get("total"), len(businesses))
         return {
-            "total": data.get("total", 0),
-            "no_site_count": data.get("no_site", len(businesses)),
-            "with_site_count": data.get("with_site", 0),
+            "total": total,
+            # found_raw is the pre-filter scene count; fall back to total so an
+            # older payload still renders a sane number.
+            "found_raw": _count(data.get("found_raw"), total),
+            "no_site_count": _count(data.get("no_site")),
+            "with_site_count": _count(data.get("with_site")),
+            "filter_report": data.get("filter_report", "") or "",
             "icp": data.get("icp") or {},
             "source": data.get("source", "osm"),
             "businesses": [

@@ -44,14 +44,23 @@ def summarize_profile(business: Business) -> BusinessProfile:
 
 def draft_email(profile: BusinessProfile, contact: ContactCandidate,
                 product: str, tone: str) -> EmailDraft:
-    """Template-grade fallback referencing the goal's product line."""
-    name = contact.name or "there"
+    """Template-grade fallback built from the shared copy deck.
+
+    Same structure as the AI path: greeting, category-level issue, offer,
+    flyer line, exact CTA and sign-off. No invented institution fact.
+    """
+    from agents import email_copy
+
+    business = "your institution"
+    category = profile.industry if profile.industry != "unknown" else ""
+    greeting = (f"Dear {contact.name}," if contact.name
+                else email_copy.DEFAULT_GREETING)
+    issue = email_copy.issue_line(business, category)
     return EmailDraft(
-        subject=f"{product} for {profile.industry != 'unknown' and profile.industry or 'your team'}".strip(),
-        body=(f"Hi {name},\n\nWe help teams like yours with {product}. "
-              f"Quick 5-minute chat this week?\n\nBest"),
-        greeting=f"Hi {name},",
-        hook=profile.hook,
+        subject="Licensed AutoCAD seats for your next batch",
+        body=email_copy.compose_body(issue, greeting=greeting),
+        greeting=greeting,
+        hook=issue.split(". ")[0].rstrip(".") + ".",
         ai_powered=False,
         source="fallback",
     )

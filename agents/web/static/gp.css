@@ -1,0 +1,1154 @@
+/* ═══════════════════════════════════════════════════════════════
+   CRIMSON SKIN — loaded after style.css, overrides only.
+   Oxblood ground, gold that acts, bone that reads.
+   Bodoni Moda speaks, Figtree reads, Fragment Mono counts.
+   Delete the <link> and the app is back to the warm pixel theme.
+   ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  --paper:       #0b0708;
+  --paper-deep:  #14080c;
+  --panel:       #1c0a11;
+  --ink:         #f4ebdb;
+  --ink-soft:    #bda891;
+  --line:        rgba(200, 161, 90, 0.22);
+  --line-warm:   rgba(200, 161, 90, 0.36);
+  --moss:        #c8a15a;
+  --moss-deep:   #a8803f;
+  --moss-floor:  #1a0a10;
+  --wood:        #521020;
+  --wood-deep:   #3a0b16;
+  --brick:       #8e1730;
+  --accent:      #c8a15a;
+  --accent-soft: rgba(200, 161, 90, 0.16);
+  --rose:        #e8707f;
+  --green-ok:    #c8a15a;
+  --red-bad:     #c2183c;
+  --amber-warn:  #e8cb8e;
+  --shadow:      0 18px 40px rgba(0, 0, 0, 0.55);
+  /* text that sits ON gold or blood — never bone */
+  --on-accent:   #180a0e;
+
+  --r-sm: 0px;
+  --r-md: 0px;
+  --r-lg: 0px;
+
+  --body-font:   'Figtree', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --pixel-font:  'Silkscreen', 'Figtree', monospace;
+  --display-font: 'Bodoni Moda', 'Figtree', Georgia, serif;
+  --mono-font:   'Fragment Mono', ui-monospace, 'Cascadia Mono', monospace;
+
+  --amb-outer:   #0b0708;
+  --amb-sky-1:   #1c0a11;
+  --amb-sky-2:   #3a0b16;
+  --amb-dim:     0.30;
+}
+
+html, body {
+  font-size: 15px;
+  font-family: var(--body-font);
+  background: var(--amb-outer);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.app { padding: 12px; gap: 12px; }
+
+/* ── Boot / loading screen ─────────────────────────────────────
+   The gnosispay gpbStack shuffle: the front card drops away and fades,
+   the next rises from behind and settles. Three cards on staggered
+   delays make it a conveyor instead of a single heartbeat. */
+
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: 26px;
+  background:
+    radial-gradient(90% 70% at 50% 0%, #191360 0%, rgba(25, 19, 96, 0) 70%),
+    #0b0708;
+  transition: opacity .45s ease, visibility .45s ease;
+  /* Backstop: with no script at all, the splash still leaves. */
+  animation: gp-boot-hide .001s linear 6.2s forwards;
+}
+.boot.is-done { opacity: 0; visibility: hidden; }
+
+.boot-stage {
+  position: relative;
+  width: 236px;
+  height: 168px;
+}
+.boot-card {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 132px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  border-radius: 18px;
+  background: #14104a;
+  border: 1px solid rgba(255, 250, 251, 0.10);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  color: #fffafb;
+  transform-origin: 50% 0%;
+  animation: gp-stack 10s cubic-bezier(0.45, 0, 0.2, 1) infinite;
+}
+.boot-card:nth-child(1) { animation-delay: 0s; }
+.boot-card:nth-child(2) { animation-delay: -3.34s; }
+.boot-card:nth-child(3) { animation-delay: -6.67s; }
+
+.boot-card-top { display: flex; align-items: center; gap: 9px; }
+.boot-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgba(203, 251, 108, 0.16);
+}
+.boot-name {
+  font-family: var(--display-font);
+  font-size: 13px;
+  letter-spacing: .02em;
+}
+.boot-role { font-size: 11px; color: var(--ink-soft); }
+.boot-card-bot { display: grid; gap: 6px; }
+.boot-line { height: 5px; border-radius: 99px; background: rgba(255, 250, 251, 0.13); }
+.boot-line.w70 { width: 70%; }
+.boot-line.w45 { width: 45%; background: rgba(203, 251, 108, 0.55); }
+
+@keyframes gp-stack {
+  0%, 20%    { transform: translateY(0) scale(1);        opacity: 1;    z-index: 4; }
+  24%        { transform: translateY(34px) scale(1.02);  opacity: 0;    z-index: 4; }
+  24.5%, 45% { transform: translateY(-58px) scale(.82);  opacity: 0;    z-index: 1; }
+  50%, 70%   { transform: translateY(-40px) scale(.88);  opacity: .85;  z-index: 2; }
+  75%, 95%   { transform: translateY(-20px) scale(.94);  opacity: .95;  z-index: 3; }
+  100%       { transform: translateY(0) scale(1);        opacity: 1;    z-index: 4; }
+}
+
+.boot-word {
+  font-family: var(--display-font);
+  font-size: 30px;
+  letter-spacing: .04em;
+  color: #fffafb;
+}
+.boot-word::first-letter { color: var(--accent); }
+
+.boot-bar {
+  width: 200px;
+  height: 3px;
+  border-radius: 99px;
+  background: rgba(255, 250, 251, 0.12);
+  overflow: hidden;
+}
+.boot-bar i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 99px;
+  background: var(--accent);
+  transform-origin: left center;
+  animation: gp-bar 1.7s cubic-bezier(0.2, 0.8, 0, 1) infinite;
+}
+@keyframes gp-bar {
+  0%   { transform: scaleX(0); }
+  55%  { transform: scaleX(1); }
+  100% { transform: scaleX(1); opacity: 0; }
+}
+.boot-note {
+  font-family: var(--mono-font);
+  font-size: 11px;
+  letter-spacing: .16em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+@keyframes gp-boot-hide { to { opacity: 0; visibility: hidden; } }
+
+/* ── Chrome: topbar, menu, tabs ─────────────────────────────── */
+
+.topbar {
+  background: transparent;
+  border: none;
+  padding: 2px 4px;
+  font-family: var(--body-font);
+}
+.logo-chip {
+  font-family: var(--display-font);
+  font-size: 15px;
+  letter-spacing: .03em;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+.topbar-note, .clock-chip {
+  font-family: var(--mono-font);
+  font-size: 11px;
+  color: var(--ink-soft);
+  background: rgba(255, 250, 251, 0.05);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+.conn {
+  font-family: var(--mono-font);
+  font-size: 11px;
+  color: var(--ink-soft);
+  background: rgba(255, 250, 251, 0.05);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 5px 11px;
+}
+.conn-dot, .conn i { background: var(--accent); box-shadow: 0 0 8px rgba(203, 251, 108, .8); }
+
+.menu-btn {
+  font-family: var(--body-font);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+  background: rgba(255, 250, 251, 0.06);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background .16s ease, border-color .16s ease;
+}
+.menu-btn:hover { background: rgba(203, 251, 108, 0.14); border-color: rgba(203, 251, 108, .5); }
+.menu-list {
+  background: #100d3c;
+  border: 1px solid var(--line-warm);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 6px;
+  min-width: 232px;
+}
+.menu-item {
+  display: grid;
+  grid-template-columns: 18px 1fr auto;
+  align-items: center;
+  gap: 9px;
+  font-family: var(--body-font);
+  font-size: 12.5px;
+  color: var(--ink);
+  background: transparent;
+  border: none;
+  border-radius: 9px;
+  padding: 9px 10px;
+  text-align: left;
+  cursor: pointer;
+  transition: background .14s ease;
+}
+.menu-item:hover { background: rgba(255, 250, 251, 0.07); }
+.menu-item em {
+  font-family: var(--mono-font);
+  font-style: normal;
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+
+.cmd {
+  background: #14080c;
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  overflow: hidden;
+}
+.cmd-head { padding: 14px 16px 8px; border-bottom: none; }
+.cmd-title b { font-family: var(--display-font); font-size: 14px; letter-spacing: .02em; }
+.idle-chip {
+  font-family: var(--mono-font);
+  font-size: 10px;
+  color: var(--ink-soft);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 8px;
+}
+.tabs { border-bottom: 1px solid var(--line); padding: 0 10px; gap: 4px; }
+.tab {
+  font-family: var(--body-font);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-soft);
+  background: transparent;
+  border: none;
+  border-radius: 10px 10px 0 0;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition: color .15s ease, background .15s ease;
+}
+.tab:hover { color: var(--ink); background: rgba(255, 250, 251, 0.04); }
+.tab.is-active {
+  color: #0b0708;
+  background: var(--accent);
+  border-radius: 10px;
+}
+
+.metric-row { gap: 8px; padding: 10px 14px; }
+.metric-card {
+  background: rgba(255, 250, 251, 0.045);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+.metric-card b {
+  font-family: var(--mono-font);
+  font-size: 15px;
+  color: var(--ink);
+}
+.metric-card span {
+  font-family: var(--body-font);
+  font-size: 10px;
+  letter-spacing: .04em;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+}
+
+/* ── Chat ───────────────────────────────────────────────────── */
+
+.tabpane[data-pane="chat"] { position: relative; display: flex; flex-direction: column; min-height: 0; }
+
+.messages {
+  padding: 16px 16px 8px;
+  gap: 14px;
+  font-family: var(--body-font);
+}
+.message {
+  display: grid;
+  gap: 4px;
+  position: relative;
+  animation: gp-msg-in .28s cubic-bezier(0.2, 0.8, 0, 1) both;
+}
+@keyframes gp-msg-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.msg-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono-font);
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 0 0 1px 2px;
+}
+.msg-label::before {
+  content: '';
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.message-user .msg-label::before { background: #ff7a90; }
+.msg-time {
+  font-family: var(--mono-font);
+  font-size: 9.5px;
+  letter-spacing: .04em;
+  color: rgba(169, 166, 201, .75);
+  margin-left: 2px;
+}
+
+.msg-content {
+  font-size: 14px;
+  line-height: 1.62;
+  color: var(--ink);
+  background: rgba(255, 250, 251, 0.055);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  border-bottom-left-radius: 5px;
+  padding: 12px 14px;
+  box-shadow: none;
+  max-width: 100%;
+  word-break: break-word;
+}
+.message-user { justify-items: end; }
+.message-user .msg-label { flex-direction: row-reverse; margin: 0 2px 1px 0; }
+.message-user .msg-content {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #0b0708;
+  border-bottom-left-radius: 14px;
+  border-bottom-right-radius: 5px;
+  font-weight: 500;
+}
+.message-jarvis .msg-content a, .msg-content a { color: var(--accent); }
+.message-user .msg-content a { color: #2b1b9c; text-decoration: underline; }
+.message-system .msg-content,
+.message-progress .msg-content {
+  background: transparent;
+  border-style: dashed;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+}
+
+/* Streaming caret: appended to the last JARVIS bubble while it grows. */
+.msg-content.is-streaming::after {
+  content: '';
+  display: inline-block;
+  width: 7px; height: 15px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--accent);
+  animation: gp-caret 1s steps(2) infinite;
+}
+@keyframes gp-caret { 0%, 50% { opacity: 1 } 51%, 100% { opacity: 0 } }
+
+/* Empty state — sits over the log until the first message lands. */
+.chat-empty {
+  position: absolute;
+  inset: 44px 16px auto;
+  display: grid;
+  gap: 10px;
+  pointer-events: none;
+  transition: opacity .25s ease;
+}
+.chat-empty[hidden] { display: none; }
+.chat-empty-title {
+  font-family: var(--display-font);
+  font-size: 17px;
+  line-height: 1.35;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+.chat-empty-title em { color: var(--accent); font-style: normal; }
+.chat-empty-sub { font-size: 12.5px; color: var(--ink-soft); margin-bottom: 6px; }
+.chat-empty-grid { display: grid; gap: 8px; }
+.empty-card {
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  background: rgba(255, 250, 251, 0.045);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 11px 13px;
+  color: var(--ink);
+  font-family: var(--body-font);
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease, transform .15s ease;
+}
+.empty-card:hover {
+  background: rgba(203, 251, 108, 0.10);
+  border-color: rgba(203, 251, 108, .45);
+  transform: translateY(-1px);
+}
+.empty-ico { font-size: 15px; }
+.empty-card b { display: block; font-size: 12.5px; font-weight: 600; }
+.empty-card span { display: block; font-size: 11px; color: var(--ink-soft); margin-top: 1px; }
+
+/* ── Composer ───────────────────────────────────────────────── */
+
+.composer { padding: 8px 14px 12px; gap: 8px; }
+.activity-strip {
+  font-family: var(--mono-font);
+  font-size: 11px;
+  color: var(--ink-soft);
+  background: rgba(255, 250, 251, 0.04);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 6px 10px;
+}
+.composer-box {
+  background: rgba(255, 250, 251, 0.06);
+  border: 1px solid var(--line-warm);
+  border-radius: 15px;
+  padding: 6px 8px;
+  transition: border-color .16s ease, box-shadow .16s ease, background .16s ease;
+}
+.composer-box:focus-within {
+  border-color: var(--accent);
+  background: rgba(203, 251, 108, 0.05);
+  box-shadow: 0 0 0 3px rgba(203, 251, 108, 0.12);
+}
+.composer-prompt { font-family: var(--mono-font); color: var(--accent); font-size: 13px; }
+#userInput {
+  font-family: var(--body-font);
+  font-size: 14px;
+  color: var(--ink);
+  background: transparent;
+  caret-color: var(--accent);
+}
+#userInput::placeholder { color: rgba(169, 166, 201, .85); }
+.composer-tool {
+  color: var(--ink-soft);
+  border-radius: 9px;
+  transition: background .15s ease, color .15s ease;
+}
+.composer-tool:hover { background: rgba(255, 250, 251, 0.08); color: var(--ink); }
+.composer-send {
+  background: var(--accent);
+  color: #0b0708;
+  border-radius: 10px;
+  transition: transform .16s cubic-bezier(.2, .9, .1, 1.2), background .16s ease;
+}
+.composer-send:hover { background: #e8cb8e; transform: scale(1.06); }
+.composer-foot { font-family: var(--body-font); font-size: 10.5px; color: rgba(169, 166, 201, .8); }
+.composer-hint { color: rgba(169, 166, 201, .8); }
+.ctx-chip, .mode-chip, .chip-more {
+  font-family: var(--mono-font);
+  font-size: 10px;
+  color: var(--ink-soft);
+  background: rgba(255, 250, 251, 0.05);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+.mode-chip[aria-pressed="true"] { background: var(--accent); color: #0b0708; border-color: var(--accent); }
+.chip {
+  font-family: var(--body-font);
+  font-size: 12px;
+  color: var(--ink);
+  background: rgba(255, 250, 251, 0.05);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 12px;
+  transition: background .15s ease, border-color .15s ease, transform .15s ease;
+}
+.chip:hover {
+  background: rgba(203, 251, 108, 0.12);
+  border-color: rgba(203, 251, 108, .45);
+  transform: translateY(-1px);
+}
+.quick-chips { padding: 4px 14px 0; gap: 6px; }
+
+/* ── Slash palette ──────────────────────────────────────────── */
+
+.slash-menu {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  bottom: 96px;
+  z-index: 30;
+  background: #100d3c;
+  border: 1px solid var(--line-warm);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  padding: 6px;
+  display: grid;
+  gap: 2px;
+}
+.slash-menu[hidden] { display: none; }
+.slash-item {
+  display: grid;
+  grid-template-columns: 112px 1fr;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 9px;
+  padding: 8px 10px;
+  color: var(--ink);
+  font-family: var(--body-font);
+  cursor: pointer;
+}
+.slash-item b { font-family: var(--mono-font); font-size: 12px; color: var(--accent); font-weight: 400; }
+.slash-item span { font-size: 11.5px; color: var(--ink-soft); }
+.slash-item:hover, .slash-item.is-sel { background: rgba(203, 251, 108, 0.10); }
+.slash-item.is-sel b { color: #0b0708; }
+.slash-item.is-sel { background: var(--accent); }
+.slash-item.is-sel span { color: rgba(11, 7, 8, .72); }
+
+/* ── Floor, roster, panels ────────────────────────────────────
+   The room's own gradient is hardcoded moss->indigo, and the time-of-day
+   ambience writes --amb-outer inline on <html>, so both need !important to
+   take the skin. The sprites and furniture are untouched. */
+
+html { --amb-outer: #0b0708 !important; }
+html, body { background: #0b0708 !important; }
+
+.floor { background: transparent; }
+.room {
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: inset 0 0 120px rgba(0, 0, 0, .55);
+  background-image:
+    repeating-linear-gradient(0deg, rgba(255, 250, 251, .04) 0 1px, transparent 1px 12px),
+    repeating-linear-gradient(90deg, rgba(255, 250, 251, .04) 0 1px, transparent 1px 12px),
+    repeating-linear-gradient(0deg, rgba(255, 250, 251, .06) 0 1px, transparent 1px 60px),
+    repeating-linear-gradient(90deg, rgba(255, 250, 251, .06) 0 1px, transparent 1px 60px),
+    radial-gradient(120% 80% at 50% 0%, rgba(63, 42, 205, .50), transparent 62%),
+    linear-gradient(#191360, #0a0726) !important;
+}
+.wall-strip {
+  background-image: repeating-linear-gradient(90deg, #14104a 0 46px, #0f0c38 46px 48px) !important;
+}
+.rug { background: rgba(203, 251, 108, .07) !important; }
+.door, .window {
+  background: rgba(10, 7, 38, .92) !important;
+  border-color: rgba(255, 250, 251, .14) !important;
+}
+
+/* Active tab: style.css sets it from --panel through an attribute selector
+   that outranks a plain class rule. */
+.tabs .tab.is-active,
+.tabs .tab[aria-selected="true"] {
+  background: var(--accent) !important;
+  color: #0b0708 !important;
+  border-radius: 10px;
+}
+.ops-feed {
+  font-family: var(--mono-font);
+  background: rgba(11, 7, 8, .82);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  color: var(--ink-soft);
+}
+.live-chip { font-family: var(--mono-font); background: rgba(11, 7, 8, .85); border-color: var(--line); }
+.zone-label, .station .zone-label { font-family: var(--pixel-font); color: #e8cb8e; }
+
+.roster-strip { background: transparent; border-top: 1px solid var(--line); }
+.roster-card {
+  background: rgba(255, 250, 251, 0.05);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  color: var(--ink);
+}
+.roster-name { font-family: var(--body-font); font-weight: 700; font-size: 12px; letter-spacing: .02em; }
+.roster-role { font-family: var(--body-font); font-size: 10.5px; color: var(--ink-soft); }
+
+.queue-panel { background: #14080c; border: 1px solid var(--line); border-radius: 14px; }
+.queue-head { font-family: var(--mono-font); font-size: 10px; color: var(--ink-soft); }
+
+.status-panel, .goal-panel, .vault-panel, .sidebar, .music-corner, .review-card, .modal {
+  background: #100d3c;
+  border: 1px solid var(--line-warm);
+  border-radius: 18px;
+  box-shadow: var(--shadow);
+  color: var(--ink);
+}
+.status-panel-header span, .sidebar-header span, .music-title {
+  font-family: var(--mono-font);
+  font-size: 10px;
+  letter-spacing: .14em;
+  color: var(--ink-soft);
+}
+.btn-close {
+  background: rgba(255, 250, 251, 0.07);
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--ink);
+}
+.btn-close:hover { background: var(--accent); color: #0b0708; }
+
+.grip { background: rgba(255, 250, 251, 0.10); }
+.grip:hover, .grip:focus-visible { background: var(--accent); }
+
+/* ── Scrollbars + selection ─────────────────────────────────── */
+
+* { scrollbar-color: rgba(203, 251, 108, .35) transparent; scrollbar-width: thin; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb { background: rgba(203, 251, 108, .28); border-radius: 99px; }
+*::-webkit-scrollbar-thumb:hover { background: rgba(203, 251, 108, .5); }
+::selection { background: rgba(203, 251, 108, .3); color: #fffafb; }
+
+@media (max-width: 900px) {
+  .boot-card { height: 118px; }
+  .boot-word { font-size: 24px; }
+  .chat-empty { inset: 40px 12px auto; }
+  /* The stacked layout keeps the desktop 300px/0/420px tracks, so the command
+     pane starts off-screen and gets clipped. One column, no splitter. */
+  .app { grid-template-columns: minmax(0, 1fr) !important; }
+  .grip { display: none; }
+}
+
+/* Below this width ten stations cannot be placed without colliding, and a
+   room full of overlapping desks reads as a bug. The team still shows in the
+   roster strip, so the floor is the part that goes. */
+@media (max-width: 720px) {
+  .floor { display: none !important; }
+  /* Hiding the floor is not enough: its 1fr row stays in the template and
+     pushes the chat half a screen down. Re-declare the areas without it. */
+  .app {
+    grid-template-areas: "topbar" "cmd" "roster";
+    grid-template-rows: auto minmax(0, 1fr) auto;
+  }
+  .cmd { border-radius: 16px; }
+  .messages { padding: 12px 12px 8px; }
+}
+
+/* ── SQUARE ──────────────────────────────────────────────────
+   No rounded corners anywhere. One radius (0), one hairline border. Round
+   survives only where the shape IS the information: the radius ring on the
+   map and the status dots. */
+
+.app *, .app *::before, .app *::after,
+.side-panel *, .side-panel *::before, .side-panel *::after,
+.boot *, .slash-menu *, .menu-list * {
+  border-radius: 0 !important;
+}
+.conn-dot, .live-chip i, .boot-dot, .map-pin-dot { border-radius: 50% !important; }
+.map-ring { border-radius: 50% !important; }
+
+/* ── Locations panel ───────────────────────────────────────── */
+
+.side-panel {
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 120;
+  width: 372px;
+  display: flex;
+  flex-direction: column;
+  background: #14080c;
+  border-right: 1px solid var(--line-warm);
+  color: var(--ink);
+  box-shadow: 28px 0 70px rgba(0, 0, 0, .5);
+}
+.side-panel[hidden] { display: none; }
+
+.side-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.side-head b {
+  font-family: var(--display-font);
+  font-size: 12px;
+  letter-spacing: .12em;
+}
+.side-x {
+  width: 26px;
+  height: 26px;
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.side-x:hover { background: var(--accent); color: #0b0708; border-color: var(--accent); }
+
+.side-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 24px;
+  display: grid;
+  gap: 20px;
+  align-content: start;
+}
+.side-sec h4 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 8px;
+  font-family: var(--mono-font);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: .16em;
+  color: var(--ink-soft);
+}
+.sec-act {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--ink-soft);
+  font-family: var(--mono-font);
+  font-size: 10px;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.sec-act:hover { color: var(--accent); }
+
+/* ── Map ───────────────────────────────────────────────────── */
+
+.map-wrap {
+  position: relative;
+  height: 260px;
+  overflow: hidden;
+  border: 1px solid var(--line-warm);
+  background: #14104a;
+  cursor: grab;
+  touch-action: none;
+}
+.map-wrap:active { cursor: grabbing; }
+.map-tiles, .map-pins { position: absolute; inset: 0; }
+.map-pins { pointer-events: none; }
+.map-tile {
+  position: absolute;
+  width: 256px;
+  height: 256px;
+  user-select: none;
+  filter: saturate(.85) brightness(.9) contrast(1.02);
+}
+.map-pin {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  border: 0;
+  background: none;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.map-pin-dot {
+  display: block;
+  width: 12px;
+  height: 12px;
+  background: var(--accent);
+  border: 2px solid #0b0708;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.map-pin-lab {
+  position: absolute;
+  top: 15px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: var(--mono-font);
+  font-size: 10px;
+  white-space: nowrap;
+  background: #0b0708;
+  border: 1px solid var(--line-warm);
+  padding: 2px 5px;
+  color: var(--ink);
+}
+.map-ring {
+  position: absolute;
+  border: 1px dashed rgba(203, 251, 108, .8);
+  background: rgba(203, 251, 108, .07);
+  pointer-events: none;
+}
+.map-zoom {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  display: grid;
+  gap: 1px;
+}
+.map-zoom button {
+  width: 26px;
+  height: 26px;
+  background: rgba(11, 7, 8, .92);
+  border: 1px solid var(--line-warm);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.map-zoom button:hover { background: var(--accent); color: #0b0708; }
+.map-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+.map-hint, .map-attrib {
+  font-family: var(--mono-font);
+  font-size: 9.5px;
+  color: rgba(169, 166, 201, .8);
+  text-decoration: none;
+}
+.map-attrib:hover { color: var(--accent); }
+
+/* ── Pins ──────────────────────────────────────────────────── */
+
+.pin-list { display: grid; gap: 6px; }
+.pin-empty { margin: 0; font-size: 12px; line-height: 1.55; color: var(--ink-soft); }
+.pin-row {
+  display: grid;
+  grid-template-columns: 1fr 24px;
+  gap: 4px 6px;
+  align-items: center;
+  border: 1px solid var(--line);
+  background: rgba(255, 250, 251, .04);
+  padding: 6px 8px;
+}
+.pin-label {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--ink);
+  font-family: var(--body-font);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.pin-label:focus { outline: none; color: var(--accent); }
+.pin-del {
+  width: 22px;
+  height: 22px;
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--ink-soft);
+  cursor: pointer;
+  line-height: 1;
+}
+.pin-del:hover { background: var(--red-bad); border-color: var(--red-bad); color: #0b0708; }
+.pin-meta {
+  grid-column: 1 / -1;
+  font-family: var(--mono-font);
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+.pin-hunt {
+  grid-column: 1 / -1;
+  justify-self: start;
+  font-family: var(--mono-font);
+  font-size: 9.5px;
+  letter-spacing: .04em;
+  background: none;
+  border: 1px solid var(--line);
+  color: var(--accent);
+  padding: 4px 8px;
+  cursor: pointer;
+}
+.pin-hunt:hover:not(:disabled) { border-color: var(--accent); background: rgba(255, 255, 255, .05); }
+.pin-hunt:disabled { color: var(--ink-soft); cursor: default; }
+
+/* ── Draft review from a pin ────────────────────────────────────
+   The same grammar as the rest of the panel: square, one hairline,
+   mono for anything you have to check, and the send button in blood
+   because it is the one irreversible action in the panel. */
+.pin-drafts {
+  margin-top: 2px;
+  border: 1px solid var(--line);
+  background: rgba(11, 7, 8, .45);
+  padding: 8px 9px;
+  display: grid;
+  gap: 6px;
+}
+.pd-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--mono-font);
+  font-size: 9px;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.pd-cancel {
+  background: none;
+  border: 0;
+  color: var(--ink-soft);
+  font-family: var(--mono-font);
+  font-size: 9px;
+  letter-spacing: .1em;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.pd-cancel:hover { color: var(--red-bad); }
+.pd-item { border: 1px solid var(--line); background: rgba(255, 250, 251, .03); }
+.pd-item summary {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--ink);
+  padding: 5px 7px;
+  cursor: pointer;
+  line-height: 1.35;
+}
+.pd-item summary:hover { color: var(--accent); }
+.pd-to {
+  font-family: var(--mono-font);
+  font-size: 8.5px;
+  color: var(--ink-soft);
+  padding: 0 7px 4px;
+  border-top: 1px solid var(--line);
+  padding-top: 4px;
+}
+.pd-body {
+  margin: 0;
+  padding: 0 7px 8px;
+  font-family: var(--body-font);
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+  max-height: 190px;
+  overflow-y: auto;
+}
+.pin-drafts .btn-run { margin-top: 2px; }
+.pin-drafts .btn-run:disabled { opacity: .6; cursor: default; }
+.pin-leads { grid-column: 1 / -1; }
+.pin-leads summary {
+  font-family: var(--mono-font);
+  font-size: 10px;
+  color: var(--accent);
+  cursor: pointer;
+}
+.pin-leads ul { margin: 6px 0 0; padding-left: 14px; display: grid; gap: 4px; }
+.pin-leads li { font-size: 11px; color: var(--ink-soft); }
+.pin-leads b { display: block; color: var(--ink); font-size: 11.5px; font-weight: 600; }
+.lead-meta { display: block; font-family: var(--mono-font); font-size: 9.5px; }
+
+/* ── Run controls ──────────────────────────────────────────── */
+
+.fld { display: grid; gap: 4px; margin-bottom: 8px; }
+.fld > span {
+  font-family: var(--mono-font);
+  font-size: 9.5px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+.fld input {
+  background: rgba(255, 250, 251, .05);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  font-family: var(--body-font);
+  font-size: 12px;
+  padding: 7px 8px;
+}
+.fld input:focus { outline: none; border-color: var(--accent); }
+.fld-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.chk {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+  font-size: 11.5px;
+  color: var(--ink-soft);
+}
+.chk input { accent-color: #c8a15a; }
+.btn-run {
+  width: 100%;
+  padding: 10px;
+  background: var(--accent);
+  border: none;
+  color: #0b0708;
+  font-family: var(--body-font);
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.btn-run:hover { background: #e8cb8e; }
+.btn-run:disabled { background: rgba(203, 251, 108, .35); cursor: progress; }
+.map-log {
+  margin-top: 8px;
+  max-height: 150px;
+  overflow-y: auto;
+  display: grid;
+  gap: 2px;
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+  font-family: var(--mono-font);
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 720px) {
+  .side-panel { width: 100%; border-right: none; }
+  .map-wrap { height: 220px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .boot, .boot-card, .boot-bar i, .message, .msg-content.is-streaming::after {
+    animation: none !important;
+  }
+  /* The splash must still leave even with motion off. */
+  .boot { animation: gp-boot-hide .001s linear 6.2s forwards !important; }
+  .empty-card, .chip, .composer-send, .menu-btn, .tab { transition: none !important; }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CRIMSON — the materials.
+   Palette and type already come from :root; this block adds what a
+   variable cannot express: frosted surfaces, gold hairlines over the
+   oxblood ground, a crimson-tinted map, and the frame the floor's
+   artwork layer sits in. No rule here carries behaviour, and the
+   floor canvas is prepended by pixel-floor.js, so nothing about the
+   room's children or their positions is touched.
+   ═══════════════════════════════════════════════════════════════ */
+
+html, body {
+  background-color: var(--paper) !important;
+}
+
+body {
+  background-image:
+    radial-gradient(78% 44% at 50% -6%, rgba(194, 24, 60, 0.20), transparent 62%),
+    radial-gradient(52% 30% at 88% 3%, rgba(200, 161, 90, 0.08), transparent 60%) !important;
+  background-repeat: no-repeat !important;
+}
+
+/* ── Frosted surfaces ─────────────────────────────────────────
+   The gradient + inner light is what reads as glass; backdrop-filter is
+   only spent on panels that genuinely float over other content, because
+   it also creates a containing block and that is a behaviour change we
+   do not want on the app shell. */
+
+.topbar, .cmd, .side-panel {
+  background: linear-gradient(155deg, rgba(82, 16, 32, 0.34), rgba(18, 10, 13, 0.68)) !important;
+  border-color: var(--line) !important;
+  box-shadow: inset 0 1px 0 rgba(244, 235, 219, 0.10), 0 22px 60px rgba(0, 0, 0, 0.45) !important;
+}
+
+.menu-list, .slash-menu, .status-panel, .queue-panel, .pin-leads, .lead-row {
+  background: linear-gradient(155deg, rgba(60, 12, 24, 0.72), rgba(14, 7, 10, 0.86)) !important;
+  backdrop-filter: blur(18px) saturate(130%);
+  -webkit-backdrop-filter: blur(18px) saturate(130%);
+  border-color: var(--line) !important;
+}
+
+.composer-box, .composer {
+  border-color: var(--line) !important;
+}
+.composer-box {
+  background: rgba(11, 7, 8, 0.55) !important;
+}
+
+/* ── The floor's frame and artwork layer ────────────────────── */
+
+.room {
+  border: 1px solid var(--line-warm) !important;
+  background: #14080c !important;
+  box-shadow: 0 26px 70px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(244, 235, 219, 0.10) !important;
+}
+
+.wall-strip {
+  background: linear-gradient(180deg, #24070f, #160709) !important;
+  border-bottom: 1px solid var(--line) !important;
+}
+
+/* The phase dimming still governs the room, just not so hard that the
+   artwork disappears under it. */
+.room-shade { opacity: 0.62; }
+
+#floorArt {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* The room's furniture is drawn from the old cream palette. On oxblood it
+   became a row of white slabs, so the pieces are toned to warm bone-on-dark
+   in one place instead of repainting every hardcoded hex in style.css. Bots
+   are deliberately NOT in this list: they are the characters. */
+.room :is(.fur, .paper, .tray, .rack-unit, .rug, .door) {
+  filter: sepia(0.62) saturate(1.25) brightness(0.40) contrast(1.05);
+}
+
+.room :is(.window) {
+  filter: sepia(0.85) saturate(2.4) hue-rotate(-18deg) brightness(0.72);
+}
+
+.room .plant i { background: var(--accent) !important; }
+
+/* ── Map: light OSM tiles glow like a lamp on oxblood ─────────── */
+
+.map-tile {
+  filter: grayscale(0.88) invert(0.92) sepia(0.55) saturate(4) hue-rotate(-18deg) brightness(0.62) contrast(1.08);
+}
+
+/* ── Type: the display face carries a little more air ─────────── */
+
+.chat-empty-title, .cmd-title b, .boot-title, .side-head h2 {
+  letter-spacing: -0.01em;
+}
+
+.chat-empty-title em { color: var(--accent) !important; font-style: italic !important; }

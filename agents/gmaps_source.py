@@ -55,6 +55,9 @@ def search_gmaps(lat: float, lon: float, radius_m: int,
     Tries Apify first, then Outscraper. Returns [] on total failure — the
     caller decides what an empty result means.
     """
+    from .config import is_dry_run
+    if is_dry_run():
+        return [{"name": f"Dry Run Business {category}", "lat": lat, "lon": lon, "source": "gmaps:dry_run"}]
     terms = _category_terms(category, goal)
     errors = []
     if get_apify_token():

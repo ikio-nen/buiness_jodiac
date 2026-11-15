@@ -11,19 +11,25 @@
 // The ?v= on each import is the same version as the document's app.js
 // tag: bump both together or a browser keeps serving an old module.
 import { esc, setActivity, clearActivityIfIdle, showQueuedChip, setWorkActive,
-         wrapAgentEvent } from './js/util.js?v=44';
-import { vtAppend, vtSwap } from './js/transitions.js?v=44';
-import { initQueue, renderQueue } from './js/queue.js?v=44';
-import { initAttachments, takeAttachment } from './js/attachments.js?v=44';
-import { initDictation } from './js/voice.js?v=44';
-import { initMusicCorner } from './js/music.js?v=44';
-import { renderChecklist, renderInterview, removeChecklistCard } from './js/campaign.js?v=44';
-import { initVault } from './js/vault.js?v=44';
+         settleActivity, wrapAgentEvent } from './js/util.js?v=79';
+import { vtAppend, vtSwap } from './js/transitions.js?v=79';
+import { initQueue, renderQueue } from './js/queue.js?v=79';
+import { initAttachments, takeAttachment } from './js/attachments.js?v=79';
+import { initDictation } from './js/voice.js?v=79';
+import { initMusicCorner } from './js/music.js?v=79';
+import { renderChecklist, renderInterview, removeChecklistCard } from './js/campaign.js?v=79';
+import { initVault } from './js/vault.js?v=79';
 
+// ── Auth: the launch cookie, not a token in the page ──────────────
+// The server trades the launch URL for an HttpOnly SameSite=Strict cookie.
+// Scripts can neither read it nor need to: same-origin fetch and the
+// WebSocket handshake both carry it automatically. A global fetch wrapper
+// that injected an X-JARVIS-Token header used to live here, which only
+// worked because the token sat in a <meta> tag every page load could read.
 
 // ── WebSocket Connection ─────────────────────────────────────────
 
-const WS_URL = `ws://${location.host}/ws`;
+const WS_URL = `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws`;
 let ws = null;
 let connected = false;
 let inputHistory = [];
@@ -97,6 +103,7 @@ function handleMessage(data) {
       // A chat-set goal ("i sell X") lands here as action=goal — keep the
       // chip honest without waiting for a reload.
       if (data.action === 'goal') refreshGoalChip();
+      settleActivity();
       break;
     case 'campaign_checklist':
       renderChecklist(data.data);
@@ -118,7 +125,7 @@ function handleMessage(data) {
     case 'agent_events_replay':
       (data.events || []).forEach(ev => handleAgentEvent(ev, true));
       break;
-    case 'error': addMessage('jarvis', data.content, { error: true }); break;
+    case 'error': addMessage('jarvis', data.content, { error: true }); settleActivity(); break;
     default:
       if (data.content) addMessage('jarvis', data.content);
   }
@@ -241,7 +248,31 @@ function makeActivatable(el) {
 
 function renderSearchResults(data) {
   if (!data.businesses || data.businesses.length === 0) {
-    addMessage('jarvis', 'No businesses found in that area.');
+    // An empty list has three very different causes, and calling all of them
+    // "no businesses in that area" reads as a broken search:
+    //   1. places found, all vetoed by the ICP  -> say how many, suggest wider
+    //   2. matches kept, but every one HAS a site -> nothing to pitch
+    //   3. genuinely nothing there               -> the plain empty
+    const kept = Number(data.total) || 0;
+    const withSite = Number(data.with_site_count) || 0;
+    // found_raw is the honest pre-filter count; icp.total is the places the
+    // ICP actually judged, kept as a fallback for older frames.
+    const judged = (data.icp && data.icp.total) || 0;
+    const raw = Number(data.found_raw) || judged || 0;
+    if (kept > 0) {
+      const n = withSite || kept;
+      addMessage('jarvis',
+        `${n} match${n === 1 ? '' : 'es'} near there already ${n === 1 ? 'has' : 'have'} a website, ` +
+        `so there is nobody to pitch${raw > kept ? ` (${kept} of ${raw} places kept)` : ''}. ` +
+        'Widen the radius or try a nearby area for businesses without a site.');
+    } else if (raw > 0) {
+      addMessage('jarvis',
+        `${raw} place${raw === 1 ? '' : 's'} found near there, but none survived the ICP filter` +
+        (data.icp && data.icp.goal_label ? ` for ${data.icp.goal_label}` : '') +
+        '. Try a broader category phrase, a wider radius, or a nearby area.');
+    } else {
+      addMessage('jarvis', 'No businesses found in that area.');
+    }
     return;
   }
   const icp = data.icp || {};
@@ -273,14 +304,29 @@ function renderSearchResults(data) {
     const webTag = b.has_website ? '<span class="tag tag-green">YES</span>' : '<span class="tag tag-red">NO</span>';
     html += `<tr><td>${i + 1}</td><td>${esc(b.name)}</td><td>${badge}</td><td class="fit-type">${type}</td><td>${webTag}</td></tr>`;
   });
-  html += `</table><div style="margin-top:8px;font-size:14px;color:var(--ink-soft);">Found ${data.total} total: `;
+  // Say how much of the scene survived the ICP: "Found 23 total" on a search
+  // that scraped 508 places hides the filter instead of reporting it.
+  const raw = Number(data.found_raw) || 0;
+  const head = raw > data.total
+    ? `${data.total} of ${raw} places survived the ICP filter`
+    : `Found ${data.total} total`;
+  html += `</table><div style="margin-top:8px;font-size:14px;color:var(--ink-soft);">${head}: `;
   html += `<span class="tag tag-red">${data.no_site_count} without site</span> `;
   html += `<span class="tag tag-green">${data.with_site_count} with site</span></div>`;
   if (data.source === 'gmaps') {
     html += `<div style="margin-top:6px;font-size:14px;color:var(--amber-warn);">↳ sourced from Google Maps (Overpass had no data here)</div>`;
   }
+  // The card is where the user decides this batch is worth pitching, so the
+  // next step of the loop starts here instead of asking them to retype it.
+  const n = Number(data.no_site_count) || data.businesses.length;
+  html += `<div style="margin-top:10px;"><button type="button" class="btn btn-primary" data-card-act="draft">✏️ draft emails for ${n === 1 ? 'this business' : 'these ' + n}</button></div>`;
   html += `</div>`;
-  appendCard(html);
+  const card = appendCard(html);
+  card.querySelector('[data-card-act="draft"]')?.addEventListener('click', () => {
+    // Same wording as the quick-action chip, so intent parsing is already known.
+    userInput.value = 'draft emails for the businesses';
+    sendMessage();
+  });
 }
 
 function renderDraftResults(data) {
@@ -324,6 +370,7 @@ function appendCard(html) {
   msg.innerHTML = `<div class="msg-label">JARVIS</div>${html}`;
   vtAppend(messagesEl, msg);
   scrollToBottom();
+  return msg;
 }
 
 
@@ -332,7 +379,6 @@ function appendCard(html) {
 //  Backend events (agents/event_bus.py) arrive as agent_event
 //  frames and make the little people walk, work, and talk.
 // ═══════════════════════════════════════════════════════════════
-
 const opsStage = document.getElementById('opsStage');
 const opsFeed = document.getElementById('opsFeed');
 const opsStats = document.getElementById('opsStats');
@@ -354,7 +400,7 @@ function ensureHiredStations() {
     st.id = id;
     st.title = 'Hired specialist desk';
     st.innerHTML = '<div class="fur fur-desk"><span class="desk"></span><span class="mon"><i></i></span><span class="chair"></span></div>' +
-      `<div class="zone-label">DESK ${i + 1}</div>`;
+      `<div class="zone-label">DESK ${i + 1}<b class="zone-count" aria-label="agents at this desk">0</b></div>`;
     stage.appendChild(st);
   }
 }
@@ -449,6 +495,7 @@ async function loadRosterAndSpawn() {
     console.warn('roster fetch failed — floor not populated', e);
   }
   buildRoster();
+  updateStationCounts();
   keys.forEach((k, i) => {
     if (k === 'jarvis') return;
     setTimeout(() => getBot(k), i * 160);
@@ -458,6 +505,56 @@ async function loadRosterAndSpawn() {
 const bots = {};        // botName -> {el, bubbleEl, bubbleTimer}
 const stationBusy = {}; // stationId -> timeout handle
 const rosterCards = {}; // name -> {card, msgsEl, msgs, activeTimer}
+
+// ── Station counts: one number per desk ──────────────────────────────
+// The floor is a strict grid of ten desks plus any hired ones; each label
+// carries the number of agents whose home station it is. Derived from the
+// same BOT_HOME projection the bots walk from, so the count can never
+// disagree with who is standing there.
+function updateStationCounts() {
+  const counts = {};
+  for (const key in BOT_HOME) {
+    const home = BOT_HOME[key] || 'station-brain';
+    counts[home] = (counts[home] || 0) + 1;
+  }
+  document.querySelectorAll('#opsStage .station').forEach(st => {
+    const badge = st.querySelector('.zone-count');
+    if (!badge) return;
+    const n = counts[st.id] || 0;
+    badge.textContent = String(n);
+    badge.classList.toggle('is-zero', n === 0);
+    // A hired desk is a slot, not furniture: it only stands on the floor while
+    // an agent is actually homed there, so the ten built-ins stay a clean grid.
+    if (st.classList.contains('station-hired')) st.classList.toggle('is-empty', n === 0);
+  });
+}
+
+// ── Empty states: a panel with nothing in it takes no space ──────────
+// The roster rail and the office ticker are telemetry, not furniture; when
+// they have nothing to say they collapse instead of holding an empty box.
+function syncEmptyStates() {
+  const strip = document.querySelector('.roster-strip');
+  if (strip) {
+    strip.classList.toggle('is-empty', !opsRoster || opsRoster.children.length === 0);
+  }
+  if (opsFeed) {
+    opsFeed.classList.toggle('is-idle', !opsFeed.querySelector('.ops-feed-line:not(.ops-idle)'));
+  }
+  const counters = document.getElementById('officeCounters');
+  if (counters) {
+    const zero = ['ocActive', 'ocDone', 'ocErr'].every(id => {
+      const el = document.getElementById(id);
+      return !el || el.textContent.trim() === '0';
+    });
+    counters.classList.toggle('is-empty', zero);
+  }
+}
+if (window.MutationObserver) {
+  const emptyObs = new MutationObserver(syncEmptyStates);
+  if (opsRoster) emptyObs.observe(opsRoster, { childList: true });
+  if (opsFeed) emptyObs.observe(opsFeed, { childList: true });
+}
+syncEmptyStates();
 
 function stationCenterPx(stationId) {
   const st = document.getElementById(stationId);
@@ -494,6 +591,10 @@ function getBot(name) {
   el.style.top = home.y + '%';
   botsLayer.appendChild(el);
   bots[name] = { el, bubbleEl: null, bubbleTimer: null, walkTimer: null };
+  // Spawn entrance: pop in from slightly compressed, then hand the bot over
+  // to the idle breathing loop in style.css.
+  el.classList.add('bot-spawn');
+  setTimeout(() => el.classList.remove('bot-spawn'), 620);
   return bots[name];
 }
 
@@ -679,11 +780,16 @@ function rosterPing(name, state, countMsg = true) {
       : state ? 'working' : 'idle';
   }
   rc.card.title = `${rc.msgs} office event${rc.msgs === 1 ? '' : 's'} this session`;
+  // An error keeps its attention state until the agent's NEXT event —
+  // errors that fade after a second get missed. Everything else winds
+  // back to idle on its usual timer.
   clearTimeout(rc.activeTimer);
-  rc.activeTimer = setTimeout(() => {
-    rc.card.classList.remove('active', 'done', 'error');
-    if (rc.stateEl) { rc.stateEl.dataset.state = 'idle'; rc.stateEl.textContent = 'idle'; }
-  }, state === 'error' ? 1200 : 2500);
+  if (state !== 'error') {
+    rc.activeTimer = setTimeout(() => {
+      rc.card.classList.remove('active', 'done');
+      if (rc.stateEl) { rc.stateEl.dataset.state = 'idle'; rc.stateEl.textContent = 'idle'; }
+    }, 2500);
+  }
 }
 
 // Packet: a little envelope hops from one zone to another (no lanes)
@@ -741,19 +847,58 @@ const STATUS_TEXT = {
   'error': 'error ✖',
 };
 
-function opsFeedLine(chip, chipCls, text, cls = '') {
+function opsFeedLine(chip, chipCls, text, cls = '', clickBot = '') {
   const idle = opsFeed.querySelector('.ops-idle');
   if (idle) idle.remove();
   const line = document.createElement('div');
   line.className = 'ops-feed-line ' + cls;
   const t = new Date().toLocaleTimeString([], { hour12: false });
-  line.innerHTML = `<span class="feed-time">${t}</span>`
-    + `<span class="feed-chip ${chipCls}">${esc(chip)}</span>`
-    + text;
+  line.innerHTML = `<span class="feed-time">${t}</span>`;
+  const chipEl = document.createElement('span');
+  chipEl.className = 'feed-chip ' + chipCls;
+  chipEl.textContent = chip;
+  // A bot's chip is the feed's own inspect affordance: click it and the
+  // command center opens that agent's pane (shortlist #4 — overview in the
+  // room, detail on demand).
+  if (clickBot) {
+    chipEl.classList.add('feed-chip-live');
+    chipEl.title = `Open the ${clickBot} agent`;
+    chipEl.addEventListener('click', () => openAgentPane(clickBot));
+  }
+  line.appendChild(chipEl);
+  const body = document.createElement('span');
+  body.innerHTML = text;
+  line.appendChild(body);
   opsFeed.appendChild(line);
   while (opsFeed.children.length > 30) opsFeed.firstChild.remove();
   opsFeed.scrollTop = opsFeed.scrollHeight;
 }
+
+// ── Office counters (three live numbers by the roster) ───────────
+// Cumulative session truth, driven by the same events that move the bots:
+// work started, work finished, work failed. No polling, no estimates.
+const ocEls = {
+  active: document.getElementById('ocActive'),
+  done: document.getElementById('ocDone'),
+  err: document.getElementById('ocErr'),
+};
+const ocChips = {
+  active: document.querySelector('.oc-active'),
+  done: document.querySelector('.oc-done'),
+  err: document.querySelector('.oc-err'),
+};
+
+function bumpCounter(kind) {
+  if (!ocEls.active) return;
+  const bump = { active: 1, done: 1, err: 1 }[kind] || 0;
+  if (!bump) return;
+  const n = (officeCounts[kind] = (officeCounts[kind] || 0) + 1);
+  ocEls[kind].textContent = n;
+  ocChips[kind].classList.remove('oc-zero');
+  ocChips[kind].classList.add('pop');
+  setTimeout(() => ocChips[kind].classList.remove('pop'), 380);
+}
+const officeCounts = { active: 0, done: 0, err: 0 };
 
 function handleAgentEvent(ev, silent = false) {
   if (!ev || !ev.kind) return;
@@ -766,9 +911,10 @@ function handleAgentEvent(ev, silent = false) {
     pulseStation(botStation(botName));
     if (ev.task) botSay(botName, String(ev.task).slice(0, 90));
     rosterPing(botName, status);
-    const cls = status === 'error' ? 'feed-err' : (status === 'done' ? 'feed-done' : '');
-    opsFeedLine(botName.toUpperCase(), 'feed-chip-bot',
-      `${esc(STATUS_TEXT[status] || status)} — ${esc(ev.task || '')}`, cls);
+  const cls = status === 'error' ? 'feed-err' : (status === 'done' ? 'feed-done' : '');
+  bumpCounter(status === 'error' ? 'err' : status === 'done' ? 'done' : 'active');
+  opsFeedLine(botName.toUpperCase(), 'feed-chip-bot',
+    `${esc(STATUS_TEXT[status] || status)} — ${esc(ev.task || '')}`, cls, botName);
 
   } else if (ev.kind === 'packet') {
     // Packet endpoints are a mix: some are stages ('pipeline', 'drafts',
@@ -794,6 +940,7 @@ function handleAgentEvent(ev, silent = false) {
     ['scout', 'strategist', 'analyst'].forEach(n => {
       setBotStatus(n, ev.status === 'done' ? 'done' : 'working');
     });
+    bumpCounter(ev.status === 'done' ? 'done' : 'active');
     opsFeedLine('TEAM', 'feed-chip-team', `${esc(ev.status || '')}: ${esc(ev.task || '')}`);
 
   } else if (ev.kind === 'step') {
@@ -803,6 +950,7 @@ function handleAgentEvent(ev, silent = false) {
       send: 'station-mailer', sync: 'station-brain',
     }[ev.phase] || 'station-brain';
     pulseStation(phaseStation, 3000);
+    if (!silent) bumpCounter(ev.failed ? 'err' : ev.done ? 'done' : 'active');
     if (!silent && !ev.done) {
       opsFeedLine((ev.phase || '?').toUpperCase(), 'feed-chip-step', esc(ev.message || ''));
     } else {
@@ -822,8 +970,24 @@ async function refreshOpsStats() {
     if (!d || d.error) return;
     const s = d.stats || {};
     const mem = (d.agents || []).reduce((a, x) => a + (x.facts || 0), 0);
-    opsStats.textContent =
-      `🧠 ${s.total_files || 0} memories · ${s.industries || 0} industries · ${s.businesses || 0} businesses · team knows ${mem} facts`;
+    // /api/brain reports businesses as a top-level array, not a stat — reading
+    // s.businesses made this line claim "0 businesses" no matter how many the
+    // brain held.
+    const biz = Array.isArray(d.businesses) ? d.businesses.length : (s.businesses || 0);
+    // Metric cards, three numbers; keep the single-line form as a fallback if
+    // the document is an older build without the cards.
+    const mM = document.getElementById('metricMem');
+    const mB = document.getElementById('metricBiz');
+    const mF = document.getElementById('metricFacts');
+    if (mM && mB && mF) {
+      mM.textContent = s.total_files || 0;
+      mB.textContent = biz;
+      mF.textContent = mem;
+      opsStats.title = `${s.industries || 0} industries · ${s.total_files || 0} memories · ${biz} businesses · team knows ${mem} facts`;
+    } else {
+      opsStats.textContent =
+        `🧠 ${s.total_files || 0} memories · ${s.industries || 0} industries · ${biz} businesses · team knows ${mem} facts`;
+    }
   } catch (e) { /* stats are cosmetic */ }
 }
 refreshOpsStats();
@@ -1037,6 +1201,8 @@ document.getElementById('teachBtn').addEventListener('click', () => {
 function removeReviewCard() {
   const el = document.getElementById('reviewCard');
   if (el) el.remove();
+  const cmd = document.querySelector('.cmd');
+  if (cmd) cmd.classList.remove('is-reviewing');
 }
 
 function renderReviewShow(data) {
@@ -1048,7 +1214,7 @@ function renderReviewShow(data) {
   label.className = 'msg-label';
   label.textContent = 'JARVIS';
   const card = document.createElement('div');
-  card.className = 'data-card';
+  card.className = 'data-card review-card';
   const title = document.createElement('div');
   title.className = 'data-card-title';
   title.textContent = `EMAIL REVIEW (${data.index + 1}/${data.total})`;
@@ -1066,9 +1232,9 @@ function renderReviewShow(data) {
   }
   card.appendChild(bizLine);
 
-  const makeField = (labelText, control) => {
+  const makeField = (labelText, control, extraCls = '') => {
     const row = document.createElement('div');
-    row.className = 'review-field';
+    row.className = 'review-field' + (extraCls ? ' ' + extraCls : '');
     const l = document.createElement('div');
     l.className = 'review-label';
     l.textContent = labelText;
@@ -1082,23 +1248,23 @@ function renderReviewShow(data) {
   toBox.value = data.to || '';
   toBox.disabled = true;
   toBox.setAttribute('aria-label', 'To');
-  card.appendChild(makeField('To', toBox));
+  card.appendChild(makeField('To', toBox, 'review-field-to'));
 
   const subjectBox = document.createElement('input');
   subjectBox.type = 'text';
   subjectBox.value = data.subject || '';
   subjectBox.setAttribute('aria-label', 'Subject');
-  card.appendChild(makeField('Subject', subjectBox));
+  card.appendChild(makeField('Subject', subjectBox, 'review-field-subject'));
 
   const bodyBox = document.createElement('textarea');
-  bodyBox.rows = 10;
+  bodyBox.rows = 8;
   bodyBox.value = data.body || '';
   bodyBox.setAttribute('aria-label', 'Body');
-  card.appendChild(makeField('Body', bodyBox));
+  card.appendChild(makeField('Body', bodyBox, 'review-field-body'));
 
   let uploadedPath = null;
   const attRow = document.createElement('div');
-  attRow.className = 'review-field';
+  attRow.className = 'review-field review-field-attach';
   const attLabel = document.createElement('div');
   attLabel.className = 'review-label';
   attLabel.textContent = 'Attachment';
@@ -1180,10 +1346,15 @@ function renderReviewShow(data) {
   msg.appendChild(label);
   msg.appendChild(card);
   messagesEl.appendChild(msg);
+  // Review takes over the pane: other chat turns collapse so To/Subject/body
+  // and the action row get the full height instead of sharing it with history.
+  const cmd = document.querySelector('.cmd');
+  if (cmd) cmd.classList.add('is-reviewing');
   scrollToBottom();
 }
 
 function renderReviewResult(d) {
+  removeReviewCard();
   const data = d || {};
   let html = `<div class="data-card"><div class="data-card-title">EMAIL REVIEW COMPLETE</div>`;
   html += `<div style="display:flex;gap:18px;margin-top:4px;">`;
@@ -1336,9 +1507,10 @@ updateCtxChip();
 
 // ── Quick Actions ────────────────────────────────────────────────
 
-document.querySelectorAll('#quickActions .chip').forEach(btn => {
+document.querySelectorAll('.quick-chips .chip, #chipsMore .chip').forEach(btn => {
   btn.addEventListener('click', () => {
     const action = btn.dataset.action;
+    if (!action) return;   // the "more" summary is a chip too, not an action
     const prompts = {
       search: 'find businesses in Bandel',
       draft: 'draft emails for the businesses',
@@ -1348,6 +1520,8 @@ document.querySelectorAll('#quickActions .chip').forEach(btn => {
       dashboard: 'show dashboard',
     };
     const text = prompts[action] || action;
+    const more = document.getElementById('chipsMore');
+    if (more) more.open = false;
     userInput.value = text;
     sendMessage();
   });
@@ -1449,13 +1623,18 @@ statusBtn.addEventListener('click', async () => {
     try {
       const res = await fetch('/api/status');
       const data = await res.json();
+      const aiProv = data.ai_provider || {};
+      let aiLabel = data.ai_configured ? 'Gemini (online)' : 'Templates (offline)';
+      if (aiProv.active) {
+        aiLabel = `${esc(aiProv.provider || 'custom')} (${esc(aiProv.model || 'active')})`;
+      }
       statusContent.innerHTML = `
         <div class="status-row"><span class="status-label">Session</span><span class="status-value">${esc(data.session_id || 'None')}</span></div>
         <div class="status-row"><span class="status-label">Name</span><span class="status-value">${esc(data.session_name || 'None')}</span></div>
         <div class="status-row"><span class="status-label">Product</span><span class="status-value">${esc(data.profile?.product || 'Not set')}</span></div>
         <div class="status-row"><span class="status-label">Target</span><span class="status-value">${esc(data.profile?.target_customers || 'Not set')}</span></div>
         <div class="status-row"><span class="status-label">Tone</span><span class="status-value">${esc(data.profile?.email_tone || 'professional')}</span></div>
-        <div class="status-row"><span class="status-label">AI Engine</span><span class="status-value">${data.ai_configured ? 'Configured' : 'Not configured'}</span></div>
+        <div class="status-row"><span class="status-label">AI Engine</span><span class="status-value">${aiLabel}</span></div>
         <div class="status-row"><span class="status-label">Businesses</span><span class="status-value">${data.businesses_found || 0}</span></div>
         <div class="status-row"><span class="status-label">No Website</span><span class="status-value">${data.businesses_no_site || 0}</span></div>
         <div class="status-row"><span class="status-label">Drafts</span><span class="status-value">${data.drafts_count || 0}</span></div>
@@ -1608,11 +1787,33 @@ initAttachments({ setActivity });
 initDictation({ input: userInput, setActivity });
 initMusicCorner({ vtSwap });
 initVault();
+
+// ── Topbar menu: one labelled group, native <details> ────────────
+// The secondary panels used to be four unlabelled icon buttons; they now live
+// in one menu so the chrome reads as a single control. Opening a panel (or
+// clicking away / pressing Escape) closes the menu.
+(function initTopMenu() {
+  const menu = document.getElementById('topMenu');
+  if (!menu) return;
+  const close = () => { menu.open = false; };
+  menu.querySelectorAll('.menu-item').forEach(item => item.addEventListener('click', close));
+  document.addEventListener('click', e => {
+    if (menu.open && !menu.contains(e.target)) close();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && menu.open) {
+      close();
+      const summary = menu.querySelector('summary');
+      if (summary) summary.focus();
+    }
+  });
+})();
 handleAgentEvent = wrapAgentEvent(handleAgentEvent, STATUS_TEXT);
 
 connect();
 addSystemMessage('J.A.R.V.I.S initialized. Type a command or use the buttons below.');
 clearActivityIfIdle();
+updateStationCounts();  // empty hire slots start hidden, not as stray desks
 loadRosterAndSpawn();   // one truth: the API roster drives the floor
 loadAgentsPane();
 loadSkillsPane();
@@ -1648,7 +1849,7 @@ fetch('/api/campaign').then(r => r.json()).then(c => {
   // bug), so the JS writes ready-made `Nfr` columns instead.
   function trackList(fr) {
     const clamped = Math.min(6, Math.max(0.2, fr));
-    return `minmax(280px, ${clamped}fr) 0px minmax(340px, 1fr)`;
+    return `minmax(280px, ${clamped}fr) 0px minmax(360px, 1fr)`;
   }
 
   function setFloorFr(fr) {
@@ -1665,7 +1866,7 @@ fetch('/api/campaign').then(r => r.json()).then(c => {
     if (m) return parseFloat(m[1]);
     const saved = parseFloat(localStorage.getItem(KEY));
     if (Number.isFinite(saved) && saved >= 0.2 && saved <= 6) return saved;
-    return 1.9;
+    return 1.35;
   }
 
   // Restore the saved split on load (floorFrNow validates the range).

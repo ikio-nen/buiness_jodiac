@@ -32,6 +32,17 @@ export function clearActivityIfIdle() {
   setActivity('office idle — run a search or “team act”');
 }
 
+/* A conversational reply ends the "JARVIS is thinking…" claim immediately.
+   Only sendMessage() raises that claim, and only job/agent events used to
+   lower it, so a plain answer left the strip thinking forever. A running job
+   still owns the strip: settle refuses to overwrite it. */
+export function settleActivity() {
+  if (_workActive) return;
+  clearTimeout(_idleTimer);
+  const el = activityStrip();
+  if (el && el.classList.contains('busy')) clearActivityIfIdle();
+}
+
 export function showQueuedChip(text) {
   setActivity('⏳ ' + (text || 'queued — will run after the current job'), 'busy');
 }

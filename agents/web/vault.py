@@ -19,6 +19,7 @@ config key getters.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -26,19 +27,130 @@ import os
 import secrets
 import time
 from pathlib import Path
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from agents.config import OUTPUT_DIR
 
 _VAULT_PATH = OUTPUT_DIR / "vault.json"
+_KEY_PATH = OUTPUT_DIR / ".vault_key"
 
 _SALT_BYTES = 16
 _HASH_ITERS = 600_000
-_TOKEN_TTL_S = 30 * 60          # unlock window: 30 minutes
+_TOKEN_TTL_S = 15 * 60          # auto-lock timeout: 15 minutes of inactivity
 _MAX_FAILS = 5                  # consecutive wrong codes before lockout
-_LOCKOUT_S = 5 * 60             # lockout duration
+_BASE_LOCKOUT_S = 60            # starting lockout: 60s, growing with consecutive lockouts
 _CODE_MIN, _CODE_MAX = 4, 128
 
 _sessions: dict[str, float] = {}   # token -> expiry epoch
+
+
+# ── Encryption for at-rest secrets in vault.json ─────────────────────
+
+def _get_encryption_key() -> bytes:
+    key_env = os.environ.get("VAULT_ENCRYPTION_KEY")
+    if key_env:
+        return hashlib.sha256(key_env.encode("utf-8")).digest()
+    if _KEY_PATH.exists():
+        try:
+            return base64.b64decode(_KEY_PATH.read_text(encoding="utf-8").strip())
+        except Exception:
+            pass
+    key = AESGCM.generate_key(bit_length=256)
+    _KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _KEY_PATH.write_text(base64.b64encode(key).decode("utf-8"), encoding="utf-8")
+    return key
+
+
+def encrypt_secret(plaintext: str) -> str:
+    """Encrypt a secret string using AES-256-GCM. Returns base64 string."""
+    if not plaintext:
+        return ""
+    key = _get_encryption_key()
+    aesgcm = AESGCM(key)
+    nonce = secrets.token_bytes(12)
+    ciphertext = aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
+    return base64.b64encode(nonce + ciphertext).decode("utf-8")
+
+
+def decrypt_secret(encrypted_b64: str) -> str:
+    """Decrypt a base64 ciphertext using AES-256-GCM. Returns plaintext string."""
+    if not encrypted_b64:
+        return ""
+    try:
+        raw = base64.b64decode(encrypted_b64.encode("utf-8"))
+        if len(raw) < 13:
+            return ""
+        nonce, ciphertext = raw[:12], raw[12:]
+        key = _get_encryption_key()
+        aesgcm = AESGCM(key)
+        decrypted = aesgcm.decrypt(nonce, ciphertext, None)
+        return decrypted.decode("utf-8")
+    except Exception:
+        return ""
+
+
+def get_vault_secret(entry_id: str) -> str | None:
+    """Retrieve and decrypt a secret from vault.json."""
+    data = _load()
+    sec_map = data.get("encrypted_secrets") or {}
+    enc = sec_map.get(entry_id)
+    if not enc:
+        return None
+    val = decrypt_secret(enc)
+    return val if val else None
+
+
+def set_vault_secret(entry_id: str, secret_value: str) -> None:
+    """Encrypt and store a secret in vault.json."""
+    data = _load()
+    if "encrypted_secrets" not in data:
+        data["encrypted_secrets"] = {}
+    if secret_value:
+        data["encrypted_secrets"][entry_id] = encrypt_secret(secret_value)
+    else:
+        data["encrypted_secrets"].pop(entry_id, None)
+    _save(data)
+
+
+def migrate_from_config(strip_from_config: bool = False) -> dict:
+    """Migrate plaintext secrets from config.json into encrypted vault.json.
+    Strictly opt-in: never runs automatically, creates a backup before stripping."""
+    from agents.config import CONFIG_FILE, load_config, save_config
+    cfg = load_config()
+    secret_keys = [
+        "gemini_api_key",
+        "ai_provider_key",
+        "gmail_app_password",
+        "gmail_user",
+        "exa_api_key",
+        "hunter_api_key",
+        "resend_api_key",
+        "brevo_api_key",
+        "tavily_api_key",
+        "geoapify_api_key",
+        "apollo_key",
+    ]
+    migrated = []
+    for k in secret_keys:
+        val = cfg.get(k)
+        if val and isinstance(val, str) and val.strip():
+            set_vault_secret(k, val.strip())
+            migrated.append(k)
+            if strip_from_config:
+                cfg.pop(k, None)
+
+    backup_path = None
+    if strip_from_config and migrated:
+        if CONFIG_FILE.exists():
+            backup_path = CONFIG_FILE.with_suffix(f".json.bak.{int(time.time())}")
+            backup_path.write_text(CONFIG_FILE.read_text(encoding="utf-8"), encoding="utf-8")
+        save_config(cfg)
+
+    log_event("migrate_keys", f"Migrated {len(migrated)} keys into encrypted vault")
+    out = {"migrated": migrated, "count": len(migrated)}
+    if backup_path:
+        out["backup"] = str(backup_path)
+    return out
 
 
 # ── code hash file ────────────────────────────────────────────────────
@@ -134,18 +246,23 @@ def verify(code: str) -> str | None:
         strikes = data["fails"]
         lockout = strikes >= _MAX_FAILS
         if lockout:
-            data["locked_until"] = time.time() + _LOCKOUT_S
+            lockout_count = int(data.get("lockout_count") or 0) + 1
+            data["lockout_count"] = lockout_count
+            # Growing lockout delay: 60s, 120s, 240s, capped at 1 hour (3600s)
+            lockout_duration = min(3600, _BASE_LOCKOUT_S * (2 ** (lockout_count - 1)))
+            data["locked_until"] = time.time() + lockout_duration
             data["fails"] = 0
         # state first, log last: _save writes the pre-log snapshot, so a
         # log_event before it would be clobbered (read-modify-write order).
         _save(data)
         if lockout:
-            log_event("lockout", f"{_MAX_FAILS} wrong codes")
+            log_event("lockout", f"{_MAX_FAILS} wrong codes, locked for {lockout_duration}s")
         else:
             log_event("wrong_code", f"strike {strikes}/{_MAX_FAILS}")
         return None
     data["fails"] = 0
     data["locked_until"] = 0
+    data["lockout_count"] = 0
     _save(data)
     _sweep()
     token = secrets.token_urlsafe(32)
@@ -157,7 +274,11 @@ def verify(code: str) -> str | None:
 def check(token: str) -> bool:
     _sweep()
     exp = _sessions.get(token or "")
-    return bool(exp and exp > time.time())
+    if exp and exp > time.time():
+        # Rolling activity auto-lock timeout: refresh activity window on use
+        _sessions[token] = time.time() + _TOKEN_TTL_S
+        return True
+    return False
 
 
 def lock(token: str) -> None:
@@ -181,8 +302,16 @@ def _mask(secret: str) -> str:
     return f"{secret[:4]}…{secret[-2:]}"
 
 
+def _key_source(env_var: str, vault_key: str) -> str:
+    if os.environ.get(env_var):
+        return "env"
+    if get_vault_secret(vault_key):
+        return "vault"
+    return "config"
+
+
 def _provider_source() -> str:
-    return "env" if os.environ.get("AI_PROVIDER_KEY") else "config"
+    return _key_source("AI_PROVIDER_KEY", "ai_provider_key")
 
 
 # ── activity log (the owner's "who touched my keys" answer) ──────────
@@ -214,11 +343,11 @@ def entries() -> list[dict]:
     from agents import config
     rows = [
         {"id": "gemini_api_key", "label": "Gemini API key",
-         "secret": config.get_gemini_key(), "source": "config"},
+         "secret": config.get_gemini_key(), "source": _key_source("GEMINI_API_KEY", "gemini_api_key")},
         {"id": "ai_provider_key", "label": "AI provider key (OpenCode/Vercel/Groq)",
          "secret": config.get_ai_provider_key(), "source": _provider_source()},
         {"id": "gmail_app_password", "label": "Gmail app password",
-         "secret": config.get_gmail_app_password(), "source": "config"},
+         "secret": config.get_gmail_app_password(), "source": _key_source("GMAIL_APP_PASSWORD", "gmail_app_password")},
         {"id": "gmail_user", "label": "Gmail account", "secret": "", "source": ""},
     ]
     out = []
@@ -245,9 +374,10 @@ def reveal(entry_id: str) -> str | None:
         "gmail_user": config.get_gmail_user,
     }
     getter = getters.get(entry_id)
-    if getter and entry_id != "gmail_user":
+    if getter:
         log_event("reveal", entry_id)
-    return (getter() or "") if getter else None
+        return getter() or ""
+    return None
 
 
 def vault_file_path() -> Path:

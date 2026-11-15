@@ -133,9 +133,11 @@ PROPOSAL_COPY = {
 }
 
 
-def generate_proposal_pdf(business: dict, sender_name: str = "The Team",
+def generate_proposal_pdf(business: dict, sender_name: str = "",
                           goal=None) -> str:
     """Generate the proposal PDF for this goal. Returns the file path."""
+    from agents.config import get_sender_name
+    sender_name = sender_name or get_sender_name()
     from agents.icp import resolve_goal, product_line
 
     goal = goal or resolve_goal()

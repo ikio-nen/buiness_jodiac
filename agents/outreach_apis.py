@@ -9,6 +9,8 @@ env vars only (never in code, never in git), mirroring the provider-key rule:
   OUTREACH_FROM_EMAIL                 sender address for both
   TAVILY_API_KEY                      AI-optimized search + extract
                                       (1k credits/mo recurring, no card)
+  EXA_API_KEY / config exa_api_key    Exa neural search (env wins over
+                                      config.json, same rule as AI key)
   GEOAPIFY_API_KEY                    geocoding + Places with phone/website
                                       fields (3k credits/day, no card)
   REACHER_URL                         self-hosted Reacher email verifier
@@ -60,10 +62,21 @@ def _from_addr() -> str:
     return _env("OUTREACH_FROM_EMAIL")
 
 
+def _is_dry_run() -> bool:
+    try:
+        from .config import is_dry_run
+        return is_dry_run()
+    except Exception:
+        import os
+        return os.environ.get("DRY_RUN", "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def resend_send(to_email: str, subject: str, body: str,
                from_email: str = "") -> dict:
     """Send via Resend (3k/mo free, no card). Returns {"status": "sent",
     "id": ...} or {"error": ...}."""
+    if _is_dry_run():
+        return {"status": "sent", "id": "dry_run_resend", "to": to_email, "via": "resend", "dry_run": True}
     key = _env("RESEND_API_KEY")
     if not key:
         return {"error": "RESEND_API_KEY not set"}
@@ -84,6 +97,8 @@ def resend_send(to_email: str, subject: str, body: str,
 def brevo_send(to_email: str, subject: str, body: str,
                from_email: str = "") -> dict:
     """Send via Brevo (300/day free, no card) — the volume backup sender."""
+    if _is_dry_run():
+        return {"status": "sent", "id": "dry_run_brevo", "to": to_email, "via": "brevo", "dry_run": True}
     key = _env("BREVO_API_KEY")
     if not key:
         return {"error": "BREVO_API_KEY not set"}
@@ -104,10 +119,45 @@ def brevo_send(to_email: str, subject: str, body: str,
 
 # ── Research: search + extract ───────────────────────────────────────
 
+def _exa_key() -> str:
+    """EXA_API_KEY env first, then config.json (same env-wins rule as the
+    AI provider key). Lazy import so this module stays standalone."""
+    try:
+        from .config import get_exa_key
+        return get_exa_key()
+    except Exception:
+        return ""
+
+
+def exa_search(query: str, max_results: int = 5) -> dict:
+    """Exa neural search (api.exa.ai). Returns
+    {"results": [{title, url, content, via: "exa"}]} or {"error": ...}."""
+    if _is_dry_run():
+        return {"results": [{"title": "Dry Run Search Result", "url": "https://example.com/dry-run", "content": "Dry run mock content"}], "via": "exa", "dry_run": True}
+    key = _exa_key()
+    if not key:
+        return {"error": "EXA_API_KEY not set"}
+    try:
+        r = _post("https://api.exa.ai/search",
+                  {"query": query, "numResults": max(1, max_results),
+                   "contents": {"text": {"maxCharacters": 1000}}},
+                  headers={"x-api-key": key})
+        out = [{"title": it.get("title", ""),
+                "url": it.get("url", ""),
+                "content": ((it.get("text") or it.get("snippet") or "")
+                            [:1000])}
+               for it in r.get("results", [])]
+        return {"results": out, "via": "exa"}
+    except Exception as e:
+        return _fail("exa_search", e)
+
+
 def tavily_search(query: str, max_results: int = 5) -> dict:
     """Tavily search (1k credits/mo recurring, no card, agent-friendly ToS).
 
     Returns {"results": [{title, url, content}]} or {"error": ...}."""
+    if _is_dry_run():
+        return {"results": [{"title": "Dry Run Tavily Result", "url": "https://example.com/tavily-dry", "content": "Dry run mock content"}], "dry_run": True}
     key = _env("TAVILY_API_KEY")
     if not key:
         return {"error": "TAVILY_API_KEY not set"}
@@ -127,6 +177,8 @@ def tavily_search(query: str, max_results: int = 5) -> dict:
 def tavily_extract(urls: list[str], query: str = "") -> dict:
     """Tavily extract: clean page text for URLs. Returns
     {"results": [{url, text}]} or {"error": ...}."""
+    if _is_dry_run():
+        return {"results": [{"url": u, "text": "Dry run extracted text"} for u in urls], "dry_run": True}
     key = _env("TAVILY_API_KEY")
     if not key:
         return {"error": "TAVILY_API_KEY not set"}
@@ -164,7 +216,12 @@ def _ddgs_search(query: str, max_results: int = 5) -> dict:
 
 
 def research_search(query: str, max_results: int = 5) -> dict:
-    """Preferred search entry: Tavily when keyed, keyless ddgs otherwise."""
+    """Preferred search entry: Exa when keyed, else Tavily when keyed,
+    keyless ddgs otherwise."""
+    if _exa_key():
+        r = exa_search(query, max_results=max_results)
+        if "error" not in r:
+            return r
     if _env("TAVILY_API_KEY"):
         r = tavily_search(query, max_results=max_results)
         if "error" not in r:
@@ -177,6 +234,8 @@ def research_search(query: str, max_results: int = 5) -> dict:
 
 def geoapify_geocode(text: str) -> dict:
     """Forward geocode. Returns {"results": [{lat, lon, label}]}."""
+    if _is_dry_run():
+        return {"results": [{"lat": 22.5726, "lon": 88.3639, "label": f"Dry Run {text}"}], "dry_run": True}
     key = _env("GEOAPIFY_API_KEY")
     if not key:
         return {"error": "GEOAPIFY_API_KEY not set"}
@@ -199,6 +258,8 @@ def geoapify_places(lat: float, lon: float, categories: str,
     """Places search with phone/website fields (caching allowed).
     categories e.g. "education.school,commercial". Returns
     {"results": [{name, categories, phone, website, lat, lon, address}]}."""
+    if _is_dry_run():
+        return {"results": [{"name": "Dry Run Institute", "categories": [categories], "phone": "1234567890", "website": "https://example.com/dry", "lat": lat, "lon": lon, "address": "123 Dry Run St"}], "dry_run": True}
     key = _env("GEOAPIFY_API_KEY")
     if not key:
         return {"error": "GEOAPIFY_API_KEY not set"}
@@ -252,6 +313,7 @@ def status() -> dict:
         "resend": bool(_env("RESEND_API_KEY")),
         "brevo": bool(_env("BREVO_API_KEY")),
         "tavily": bool(_env("TAVILY_API_KEY")),
+        "exa": bool(_exa_key()),
         "geoapify": bool(_env("GEOAPIFY_API_KEY")),
         "reacher_url": _env("REACHER_URL") or "http://localhost:8080",
         "from_email_set": bool(_from_addr()),

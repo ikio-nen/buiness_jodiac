@@ -8,7 +8,7 @@ from .config import get_gmail_user, get_gmail_app_password
 
 
 def send_email(to: str, subject: str, body: str,
-               pdf_path: str = "", sender_name: str = "The Team",
+               pdf_path: str = "", sender_name: str = "",
                attachment_path: str = "") -> dict:
     """Send an email via Gmail SMTP. Returns success status.
 
@@ -17,9 +17,17 @@ def send_email(to: str, subject: str, body: str,
         subject: Email subject line.
         body: Email body text.
         pdf_path: Optional PDF to attach (auto-generated proposal).
-        sender_name: Name in the From field.
+        sender_name: Name in the From field (defaults to the configured sender, e.g. Autodesk Educational Solutions).
         attachment_path: Optional user-specified file to attach.
     """
+    if not to or not str(to).strip():
+        return {"success": False, "error": "Recipient email address is required"}
+
+    from .config import is_dry_run, get_sender_name
+    sender_name = sender_name or get_sender_name()
+    if is_dry_run():
+        return {"success": True, "to": to, "subject": subject, "dry_run": True}
+
     gmail_user = get_gmail_user()
     gmail_pass = get_gmail_app_password()
 
@@ -59,8 +67,10 @@ def send_email(to: str, subject: str, body: str,
         return {"success": False, "error": str(e)}
 
 
-def send_batch(emails: list[dict], sender_name: str = "The Team") -> list[dict]:
+def send_batch(emails: list[dict], sender_name: str = "") -> list[dict]:
     """Send multiple emails. Each dict has: to, subject, body, pdf_path, attachment_path."""
+    from .config import get_sender_name
+    sender_name = sender_name or get_sender_name()
     results = []
     for email_data in emails:
         result = send_email(

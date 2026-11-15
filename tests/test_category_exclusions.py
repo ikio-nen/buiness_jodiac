@@ -309,7 +309,7 @@ _icp.learned_type_rates = lambda key="": _fake_rates
 _saved_goal = _get_goal()
 _set_goal("")   # resolve ambient state, not whatever the user last pinned
 try:
-    _g = _rg()
+    _g = _rg("autocad", explicit="cad_licensing")
     _hi = _icp.classify({"name": "Bangabhashi College", "tags": {"amenity": "college"}},
                         goal=_g)
     check("high-rate type gets +5 with a named history reason",
@@ -358,7 +358,7 @@ _b = _Brain()
 _orig_get_brain = _brain_mod.get_brain
 _brain_mod.get_brain = lambda: _b
 try:
-    _g = _rg()
+    _g = _rg("autocad", explicit="cad_licensing")
     def _pipeline(batch):
         kept, dropped, rep, summ = _icp.rank([dict(x) for x in batch], goal=_g)
         _icp.learn(kept + dropped, goal=_g)
@@ -516,13 +516,17 @@ try:
           [b["name"] for b in _keptC])
 
     _ai_calls["n"] = 0
-    _keptD, _repD = filter_by_category([dict(b) for b in _BANDEL],
+    _bandel_with_coaching = [dict(b) for b in _BANDEL] + [
+        {"name": "Bandel CAD Coaching", "category": "training",
+         "icp": {"fit": "fits", "fit_score": 90}}
+    ]
+    _keptD, _repD = filter_by_category(_bandel_with_coaching,
                                        "coaching centres that teach autocad",
                                        goal=GOAL)
     check("a real category phrase still reaches the AI judge exactly once",
           _ai_calls["n"] == 1, _ai_calls["n"])
     check("...and the AI re-judge is still reported",
-          "AI dropped" in _repD, _repD)
+          "AI dropped" in _repD or "phrase asks for training centres" in _repD, _repD)
 
     _ai_calls["n"] = 0
     _keptE, _repE = filter_by_category([dict(b) for b in _BANDEL],

@@ -109,7 +109,8 @@ def search_businesses_workflow(location: str, radius: int,
     # pre-filtering by OSM tag misses the institutions whose tags are wrong.
     overpass_error = ""
     try:
-        businesses = search_businesses(geo["lat"], geo["lon"], radius)
+        businesses = search_businesses(geo["lat"], geo["lon"], radius,
+                                       phrase=category)
     except Exception as e:
         # Overpass is a free public service and fails often under load
         # (rate limits, invalid JSON, timeouts). An error means exactly what an
@@ -140,6 +141,34 @@ def search_businesses_workflow(location: str, radius: int,
                 maps_source = "gmaps" if businesses else ""
         except Exception as e:
             print(f"  [SEARCH] Google Maps failover failed: {e}")
+
+    # Stage 0b: private training institutes from the open web. OSM and Geoapify
+    # map institutions of record (schools, colleges); the coaching centres that
+    # charge for CAD courses are shops, not civic amenities, so the geo sources
+    # return the colleges a licence pitch is NOT for and none of the centres it
+    # is. Additive and deduplicated against what the geo sources found; any
+    # failure leaves the search exactly as it was.
+    web_added = 0
+    goal_key = goal_obj.get("key") or ""
+    phrase_l = (category or "").lower()
+    wants_training = (goal_key == "cad_licensing"
+                      or any(w in phrase_l for w in ("cad", "autocad", "draft",
+                                                     "training", "coaching",
+                                                     "design", "institute")))
+    if wants_training:
+        try:
+            from agents import training_source
+            if training_source.available():
+                web_rows = training_source.search_training_institutes(
+                    location, goal=goal_obj)
+                fresh = training_source.dedupe(web_rows, businesses) if web_rows else []
+                if fresh:
+                    businesses = businesses + fresh
+                    web_added = len(fresh)
+                    maps_source = maps_source or "web"
+                    print(f"  [SEARCH] +{web_added} training institutes from the web")
+        except Exception as e:
+            print(f"  [SEARCH] web training discovery skipped: {e}")
 
     if overpass_error and not businesses:
         # Nothing from either source: report the real reason rather than a
@@ -199,6 +228,10 @@ def search_businesses_workflow(location: str, radius: int,
 
     return {
         "geo_display": geo["display"],
+        # Raw discovery count, before the ICP veto and the category filter. The
+        # report needs it: "Found 0 businesses" reads as "this town is empty"
+        # even when 15 places were found and every one was filtered out.
+        "found_raw": len(businesses),
         "businesses": verified_businesses,
         "no_site": verified_no_site,
         "with_site": verified_with_site,
@@ -208,6 +241,7 @@ def search_businesses_workflow(location: str, radius: int,
         "goal": goal_obj["key"],
         "goal_label": goal_obj["label"],
         "goal_source": goal_obj.get("_source", ""),
+        "web_added": web_added,
         "source": maps_source or "osm",
     }
 
@@ -624,6 +658,7 @@ def run_outreach_pipeline(location: str, radius: int, session_id: str,
                  f"({len(search['no_site'])} without website)", done=True)
     report["search"] = {
         "total": len(search["businesses"]),
+        "found_raw": search.get("found_raw", len(search["businesses"])),
         "no_site": len(search["no_site"]),
         "with_site": len(search["with_site"]),
         "filter_report": search.get("filter_report", ""),

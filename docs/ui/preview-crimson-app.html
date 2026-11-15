@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>J.A.R.V.I.S — app in crimson (mock)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400;0,6..96,600;1,6..96,400&family=Figtree:wght@300;400;500;600;700&family=Fragment+Mono&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --black: #0b0708; --black-soft: #120a0d; --oxblood: #24070f;
+    --crimson: #521020; --blood: #c2183c;
+    --gold: #c8a15a; --gold-lit: #e8cb8e;
+    --bone: #f4ebdb; --bone-dim: #b9a892;
+    --hair: rgba(200,161,90,.24); --hair-soft: rgba(244,235,219,.09);
+    --display: 'Bodoni Moda', Georgia, serif;
+    --body: 'Figtree', system-ui, sans-serif;
+    --mono: 'Fragment Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; border-radius: 0; }
+  html, body { height: 100%; margin: 0; background: var(--black); color: var(--bone); font-family: var(--body); overflow: hidden; }
+  body { display: grid; grid-template-rows: 52px 1fr; }
+
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 20px; border-bottom: 1px solid var(--hair);
+    background: linear-gradient(180deg, #1a0a0f, #120a0d);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand h1 { font-family: var(--display); font-size: 18px; letter-spacing: .16em; margin: 0; font-weight: 400; }
+  .brand h1 i { font-style: normal; color: var(--gold); }
+  .brand span { font-family: var(--mono); font-size: 9px; letter-spacing: .2em; color: var(--bone-dim); border: 1px solid var(--hair); padding: 3px 6px; }
+  .topright { display: flex; align-items: center; gap: 10px; }
+  .live { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em; color: var(--gold); border: 1px solid var(--hair); padding: 5px 9px; text-transform: uppercase; }
+  .live i { width: 5px; height: 5px; background: var(--gold); display: block; border-radius: 50%; }
+  .menu { font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; border: 1px solid var(--hair); padding: 5px 10px; color: var(--bone-dim); }
+
+  main { display: grid; grid-template-columns: 372px 1fr; min-height: 0; }
+
+  /* ── left panel ── */
+  .panel { border-right: 1px solid var(--hair); background: #0d0709; display: flex; flex-direction: column; min-height: 0; }
+  .phead { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--hair); }
+  .phead b { font-family: var(--display); font-size: 11.5px; letter-spacing: .2em; }
+  .phead i { font-style: normal; color: var(--bone-dim); font-size: 15px; line-height: 1; }
+  .pbody { padding: 14px 16px 16px; overflow: hidden; }
+  .map {
+    position: relative; height: 214px; border: 1px solid var(--hair); overflow: hidden;
+    background:
+      radial-gradient(58% 52% at 34% 40%, rgba(194,24,60,.26), transparent 70%),
+      repeating-linear-gradient(0deg, rgba(200,161,90,.11) 0 1px, transparent 1px 24px),
+      repeating-linear-gradient(90deg, rgba(200,161,90,.11) 0 1px, transparent 1px 24px),
+      #170a0e;
+  }
+  .map img.tile {
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+    filter: grayscale(.9) invert(.93) sepia(.6) saturate(4.5) hue-rotate(-18deg) brightness(.62) contrast(1.1);
+  }
+  .map .wash { position: absolute; inset: 0; background: radial-gradient(72% 72% at 42% 42%, rgba(194,24,60,.26), rgba(11,7,8,.62) 88%); }
+  .map .ring { position: absolute; left: 14%; top: 16%; width: 58%; height: 64%; border: 1px dashed rgba(200,161,90,.55); border-radius: 50%; background: rgba(200,161,90,.045); }
+  .map .zoom { position: absolute; right: 8px; top: 8px; display: grid; gap: 1px; }
+  .map .zoom b { width: 22px; height: 22px; display: grid; place-items: center; background: rgba(11,7,8,.82); border: 1px solid var(--hair); color: var(--bone); font-weight: 400; font-size: 12px; }
+  .pin { position: absolute; left: 43%; top: 46%; width: 10px; height: 10px; background: var(--gold); border: 2px solid #0b0708; }
+  .pin span { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); font-family: var(--mono); font-size: 9px; background: #0b0708; border: 1px solid var(--hair); padding: 2px 5px; white-space: nowrap; }
+  .mapfoot { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 8.5px; color: rgba(185,168,146,.75); margin-top: 5px; }
+
+  .ph { display: flex; justify-content: space-between; align-items: baseline; margin: 15px 0 7px; font-family: var(--mono); font-size: 9px; letter-spacing: .2em; text-transform: uppercase; color: var(--gold); }
+  .ph span:last-child { color: var(--bone-dim); letter-spacing: .1em; }
+  .pinrow { border: 1px solid var(--hair); background: rgba(244,235,219,.035); }
+  .pinrow .top { display: flex; justify-content: space-between; padding: 7px 9px 2px; }
+  .pinrow b { font-size: 12px; font-weight: 600; }
+  .pinrow .top i { font-style: normal; color: var(--bone-dim); font-size: 13px; line-height: 1; }
+  .pinrow small { display: block; padding: 0 9px 7px; font-family: var(--mono); font-size: 9px; color: var(--bone-dim); }
+  .leads { border-top: 1px solid var(--hair-soft); padding: 6px 9px; font-family: var(--mono); font-size: 9px; color: var(--gold); display: flex; justify-content: space-between; }
+
+  .fieldlabel { margin: 14px 0 6px; font-family: var(--mono); font-size: 9px; letter-spacing: .2em; text-transform: uppercase; color: var(--gold); }
+  .query { border: 1px solid var(--hair); padding: 7px 9px; font-size: 11.5px; color: var(--bone); background: rgba(11,7,8,.5); }
+  .grow { display: flex; align-items: center; gap: 7px; margin: 9px 0; font-size: 11px; color: var(--bone); }
+  .grow b { width: 11px; height: 11px; background: var(--gold); display: grid; place-items: center; color: #180a0e; font-size: 8px; }
+  .fields { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .f em { display: block; font-style: normal; font-family: var(--mono); font-size: 8.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--bone-dim); margin-bottom: 4px; }
+  .f div { border: 1px solid var(--hair); padding: 5px 7px; font-family: var(--mono); font-size: 11px; }
+  .run { width: 100%; margin-top: 10px; padding: 9px; background: var(--blood); color: #fff; border: none; font-family: var(--body); font-weight: 700; font-size: 11.5px; }
+  .log { margin-top: 8px; border: 1px solid var(--hair); padding: 6px 8px; font-family: var(--mono); font-size: 9px; line-height: 1.85; color: var(--bone-dim); }
+  .log b { color: var(--gold); font-weight: 400; }
+
+  /* ── chat column ── */
+  .chat { display: flex; flex-direction: column; min-height: 0; background: var(--black); }
+  .chead { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--hair); background: #120a0d; }
+  .chead .who { display: flex; align-items: center; gap: 10px; }
+  .chead .who b { font-family: var(--display); font-size: 14px; letter-spacing: .12em; font-weight: 400; }
+  .chead .who span { font-family: var(--mono); font-size: 8.5px; letter-spacing: .16em; color: var(--bone-dim); border: 1px solid var(--hair); padding: 3px 6px; text-transform: uppercase; }
+  .tabs { display: flex; gap: 2px; }
+  .tab { font-size: 11px; font-weight: 600; padding: 6px 13px; border: 1px solid transparent; color: var(--bone-dim); }
+  .tab.on { background: var(--gold); color: #180a0e; border-color: var(--gold); }
+
+  .stream { flex: 1; overflow: hidden; padding: 16px 20px; }
+  .msg { margin-bottom: 14px; }
+  .by { font-family: var(--mono); font-size: 9px; letter-spacing: .14em; text-transform: uppercase; color: var(--bone-dim); margin-bottom: 5px; display: flex; align-items: center; gap: 7px; }
+  .by::before { content: ''; width: 4px; height: 4px; background: var(--gold); display: block; }
+  .bub { border: 1px solid var(--hair); border-left: 2px solid var(--gold); background: rgba(244,235,219,.035); padding: 11px 13px; font-size: 13px; line-height: 1.68; }
+  .bub p { margin: 0 0 7px; }
+  .bub p:last-child { margin: 0; }
+  .bub small { font-family: var(--mono); font-size: 10px; color: var(--bone-dim); }
+  .chips { display: flex; gap: 2px; margin: 12px 0; }
+  .chip { border: 1px solid var(--hair); padding: 5px 11px; font-size: 10.5px; font-weight: 600; color: var(--bone); background: rgba(244,235,219,.03); }
+
+  .composer { border-top: 1px solid var(--hair); padding: 12px 20px 14px; background: #120a0d; }
+  .box { display: flex; align-items: center; gap: 10px; border: 1px solid var(--hair); padding: 9px 11px; background: rgba(11,7,8,.6); }
+  .box .plus { width: 22px; height: 22px; display: grid; place-items: center; border: 1px solid var(--hair); color: var(--gold); font-size: 12px; }
+  .box p { flex: 1; margin: 0; font-size: 12.5px; color: var(--bone-dim); }
+  .box .send { width: 30px; height: 30px; background: var(--blood); display: grid; place-items: center; font-size: 12px; }
+  .hint { display: flex; justify-content: space-between; margin-top: 8px; font-family: var(--mono); font-size: 8.5px; letter-spacing: .1em; color: rgba(185,168,146,.7); text-transform: uppercase; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <h1>J.A.R.V.I.<i>S</i></h1>
+    <span>PROJECT 20261111</span>
+  </div>
+  <div class="topright">
+    <div class="live"><i></i>online</div>
+    <div class="menu">menu</div>
+  </div>
+</div>
+
+<main>
+  <section class="panel">
+    <div class="phead"><b>LOCATIONS</b><i>×</i></div>
+    <div class="pbody">
+      <div class="map">
+        <img class="tile" alt="" src="https://tile.openstreetmap.org/12/3052/1783.png">
+        <div class="wash"></div>
+        <div class="ring"></div>
+        <div class="pin"><span>Simla</span></div>
+        <div class="zoom"><b>+</b><b>−</b></div>
+      </div>
+      <div class="mapfoot"><span>click to drop a pin · drag to pan</span><span>© OpenStreetMap</span></div>
+
+      <div class="ph"><span>Pins</span><span>clear</span></div>
+      <div class="pinrow">
+        <div class="top"><b>Simla</b><i>×</i></div>
+        <small>4.2 km · 24 new</small>
+        <div class="leads"><span>▸ 24 leads</span><span>14 fits</span></div>
+      </div>
+
+      <div class="ph"><span>Run</span></div>
+      <div class="query">CAD training institutes, not colleges</div>
+      <div class="grow"><b>✓</b> grow the circle each round</div>
+      <div class="fields">
+        <div class="f"><em>start km</em><div>3.0</div></div>
+        <div class="f"><em>target</em><div>10</div></div>
+        <div class="f"><em>rounds</em><div>4</div></div>
+      </div>
+      <button class="run">Run pins</button>
+      <div class="log">
+        — run started —<br>
+        <b>Simla</b> · round 1 · 3.0 km<br>
+        &nbsp;&nbsp;kept 24 · new 24 · total 24<br>
+        <b>Simla</b> · round 2 · 4.2 km<br>
+        &nbsp;&nbsp;kept 31 · <b>new 7</b> · total 31
+      </div>
+    </div>
+  </section>
+
+  <section class="chat">
+    <div class="chead">
+      <div class="who"><b>J.A.R.V.I.S</b><span>runs the floor</span></div>
+      <div class="tabs"><div class="tab on">chat</div><div class="tab">agents</div><div class="tab">skills</div></div>
+    </div>
+
+    <div class="stream">
+      <div class="msg">
+        <div class="by">jarvis · 09:27</div>
+        <div class="bub">
+          <p>Serampore is done — <b>24 kept</b>, 23 of them private training centres, one college
+            filtered out. Eight have a verified email; the rest have phone only.</p>
+          <p><small>CADD Centre Salt Lake · Ascent Infotech CAD Training Institute · AutoCAD Training Centre</small></p>
+        </div>
+      </div>
+
+      <div class="chips"><div class="chip">search</div><div class="chip">draft</div><div class="chip">research</div><div class="chip">+ more</div></div>
+
+      <div class="msg">
+        <div class="by">jarvis · 09:27</div>
+        <div class="bub">
+          <p>Second pass at <b>4.2 km</b> added seven more institutes on the north edge — they were
+            outside the first circle.</p>
+          <p><small>31 total · 19 with email · 31 in the phones CSV</small></p>
+        </div>
+      </div>
+    </div>
+
+    <div class="composer">
+      <div class="box"><div class="plus">+</div><p>Message JARVIS…</p><div class="send">➤</div></div>
+      <div class="hint"><span>enter to send · ↑↓ history</span><span>shift+tab mode · “ask scout…”</span></div>
+    </div>
+  </section>
+</main>
+</body>
+</html>

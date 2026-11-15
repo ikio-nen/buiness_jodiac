@@ -35,7 +35,8 @@ def _read_json(path: Path, default):
 
 def _overdue_followups(max_days: int = 2) -> list[dict]:
     """Pending follow-up notes older than max_days, worst first."""
-    vault = Path("D:/brain/brain/followups")
+    from .config import OBSIDIAN_FOLLOWUPS
+    vault = OBSIDIAN_FOLLOWUPS
     if not vault.exists():
         return []
     out = []
