@@ -199,6 +199,27 @@ def api_reverse_geocode(lat: float, lon: float):
         return {"label": "", "display": "", **err}
 
 
+def _map_failure_note(error: str) -> str:
+    """Turn a source failure into copy that says what to do next.
+
+    Provider and library messages arrive in the middle of a search (Overpass
+    unreachable, a places bucket rejected, a browser/API feature "not
+    supported"), and echoing them raw tells the user nothing they can act on.
+    """
+    err = (error or "").strip()
+    low = err.lower()
+    if "not supported" in low or "unsupported" in low:
+        return ("This search hit a map source that cannot answer that query. "
+                "Try a nearby town name, or drop a pin and run it from there.")
+    if "could not find" in low:
+        return err  # already names the string and the next step
+    if any(k in low for k in ("overpass", "geoapify", "timed out", "unavailable")):
+        return ("Map source unavailable right now: OpenStreetMap did not answer "
+                "and the places fallback returned nothing. Try again in a "
+                "minute, or set GEOAPIFY_API_KEY.")
+    return err or "The map search failed before it could return anything."
+
+
 @router.post("/api/map/search")
 def api_map_search(body: dict):
     """One map-pin search at an explicit radius.
@@ -207,10 +228,20 @@ def api_map_search(body: dict):
     map cannot grow a circle through it. This route takes the radius the pin
     shows. It is a plain ``def`` so the blocking discovery work (Overpass,
     web discovery, ICP) runs in the threadpool instead of stalling the loop.
+
+    The pin's own ``lat``/``lon`` are used when supplied. Searching by the
+    label alone sent a Kolkata pin named "Simla" to Shimla, Himachal Pradesh;
+    the map already knows the exact point, so it never needs a geocode.
     """
     location = str(body.get("location") or "").strip()
-    if not location:
-        raise HTTPException(status_code=400, detail="location required")
+    coords = None
+    try:
+        if body.get("lat") is not None and body.get("lon") is not None:
+            coords = (float(body["lat"]), float(body["lon"]))
+    except (TypeError, ValueError):
+        coords = None
+    if not location and not coords:
+        raise HTTPException(status_code=400, detail="location or lat/lon required")
     try:
         radius = max(500, min(int(body.get("radius") or 2500), 15000))
     except Exception:
@@ -218,10 +249,11 @@ def api_map_search(body: dict):
     category = str(body.get("category") or "").strip()
     try:
         from agents.workflows import search_businesses_workflow
-        res = search_businesses_workflow(location, radius, category=category)
+        res = search_businesses_workflow(location, radius, category=category,
+                                         coords=coords)
         if res.get("error"):
-            return {"error": res["error"], "location": location,
-                    "radius": radius, "rows": []}
+            return {"error": _map_failure_note(res["error"]),
+                    "location": location, "radius": radius, "rows": []}
         rows = []
         for b in (res.get("businesses") or [])[:60]:
             v = b.get("icp") or {}
@@ -244,6 +276,9 @@ def api_map_search(body: dict):
             "location": location, "radius": radius,
             "raw": res.get("found_raw", 0), "kept": len(rows),
             "web_added": res.get("web_added", 0),
+            # The panel needs the goal it was judged against: the same rows are
+            # kept or dropped depending on what this search is selling.
+            "goal": res.get("goal_label", ""),
             "report": (res.get("filter_report") or "")[:280],
             "rows": rows,
         }
@@ -388,12 +423,17 @@ def _foreign_branch(row: dict) -> str:
 
 
 def _map_template_draft(biz: dict, sender: str) -> tuple[str, str]:
-    """The deterministic house draft: no claim the row cannot support."""
+    """The deterministic house draft: no claim the row cannot support.
+
+    Subject and body both come from the shared deck, so this route cannot drift
+    back to the long, name-heavy subject the email gate now rejects.
+    """
     from agents import email_copy
+    from agents.medium import SUBJECTS_BY_GOAL
     issue = email_copy.issue_line(biz["name"], biz.get("category", ""))
     body = email_copy.compose_body(
         issue, greeting=email_copy.greeting_for("", biz["name"]), sender=sender)
-    return f"Licensed AutoCAD seats for {biz['name']}", body
+    return SUBJECTS_BY_GOAL["cad_licensing"][0], body
 
 
 @router.post("/api/map/draft")

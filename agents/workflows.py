@@ -80,13 +80,19 @@ def research_workflow(businesses: list[dict]) -> list[dict]:
 
 
 def search_businesses_workflow(location: str, radius: int,
-                              category: str = "", goal: str = "") -> dict:
+                              category: str = "", goal: str = "",
+                              coords: tuple | list | None = None) -> dict:
     """Search for businesses. Returns {geo_display, businesses, no_site, with_site,
     filter_report, icp, goal} or error.
 
     ``goal`` is what we are selling on this search (see agents/icp.py); it is
     resolved from the user's own phrasing when not given explicitly, because the
     target changes from search to search.
+
+    ``coords`` is an explicit (lat, lon) — the map hands over the exact point a
+    pin sits on, so a pin must never be resolved by geocoding its label: a
+    Kolkata locality called "Simla" geocoded to Shimla, Himachal Pradesh, and
+    the search came back with a different town's businesses.
     """
     if not location:
         return {"error": "No location provided"}
@@ -100,9 +106,19 @@ def search_businesses_workflow(location: str, radius: int,
     source = goal_obj.get("_source", "")
     source_tag = f" [goal: {source}]" if source else ""
 
-    geo = geocode(location)
+    geo = None
+    if coords:
+        try:
+            lat, lon = float(coords[0]), float(coords[1])
+            geo = {"lat": lat, "lon": lon, "display": location or ""}
+        except (TypeError, ValueError, IndexError):
+            geo = None
+    if geo is None:
+        geo = geocode(location)
     if not geo:
-        return {"error": "Could not find that location"}
+        return {"error": (f'Could not find "{location}" on the map. Add the town '
+                          'or district to the name, or pick the place as a pin '
+                          'instead of typing it.')}
 
     # Always search ALL categories, then let the ICP decide who is actually a
     # customer. Searching everything and filtering afterwards is deliberate:

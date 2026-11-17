@@ -17,22 +17,93 @@ CATEGORIES = [
 ]
 
 
-def geocode(query: str) -> dict | None:
-    """Geocode an address to lat/lon via Nominatim."""
-    url = f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(query)}&format=json&limit=1"
-    result = subprocess.run(
-        ["curl", "-s", "-H", "User-Agent: AgentSystem/1.0", url],
-        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        encoding="utf-8", errors="replace", timeout=10,
-    )
-    data = json.loads(result.stdout)
+def _geocode_variants(query: str) -> list[str]:
+    """Place candidates to try, most specific first.
+
+    Nominatim resolves a place name, not an instruction. "coaching centres in
+    Bandel" comes back empty, so the whole search ended on "Could not find that
+    location" for towns that are perfectly findable. The place asked for lives
+    after the preposition ("in", "near", "around") or in the trailing comma
+    segment.
+    """
+    q = (query or "").strip().strip(",")
+    if not q:
+        return []
+    out = [q]
+    low = q.lower()
+    for sep in (" in ", " near ", " around ", " at "):
+        cut = low.rfind(sep)
+        if cut > 0:
+            tail = q[cut + len(sep):].strip()
+            if tail and tail.lower() not in {x.lower() for x in out}:
+                out.append(tail)
+    parts = [p.strip() for p in q.split(",") if p.strip()]
+    if len(parts) > 1 and parts[-1].lower() not in {x.lower() for x in out}:
+        out.append(parts[-1])
+    return out[:3]
+
+
+# One failed geocode must not cost the search a minute: the budget covers every
+# spelling tried, not each of them.
+GEOCODE_BUDGET_S = 12.0
+
+
+def _nominatim(query: str, timeout: float = 10.0) -> tuple[dict | None, bool]:
+    """One Nominatim lookup -> ``(hit, answered)``.
+
+    ``answered`` separates the two kinds of nothing: Nominatim ran and knew no
+    place by that name (True), versus the lookup could not be completed at all
+    (False). Only the first kind is worth another spelling — when the service
+    is unreachable, every variant fails the same way.
+    """
+    url = ("https://nominatim.openstreetmap.org/search?q="
+           f"{urllib.parse.quote(query)}&format=json&limit=1")
+    try:
+        result = subprocess.run(
+            ["curl", "-s", "-H", "User-Agent: AgentSystem/1.0", url],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            encoding="utf-8", errors="replace", timeout=max(1.0, timeout),
+        )
+        data = json.loads(result.stdout or "")
+    except (json.JSONDecodeError, TypeError, ValueError, OSError,
+            subprocess.SubprocessError):
+        return None, False
+    if not isinstance(data, list):
+        return None, False
     if not data:
-        return None
-    return {
-        "lat": float(data[0]["lat"]),
-        "lon": float(data[0]["lon"]),
-        "display": data[0].get("display_name", ""),
-    }
+        return None, True          # a real, empty answer
+    try:
+        return {
+            "lat": float(data[0]["lat"]),
+            "lon": float(data[0]["lon"]),
+            "display": data[0].get("display_name", ""),
+        }, True
+    except (KeyError, TypeError, ValueError):
+        return None, False
+
+
+def geocode(query: str, budget: float | None = None) -> dict | None:
+    """Geocode an address to lat/lon via Nominatim.
+
+    Tries the whole phrase first and then the place inside it, so a category
+    phrase the user typed ("coaching centres in Bandel") still lands on a town
+    instead of failing the whole search.
+
+    The tries share ONE time budget (``GEOCODE_BUDGET_S``): three spellings at
+    ten seconds each would add half a minute to every failing search, and they
+    are only worth the time after a real empty answer, never after a timeout.
+    """
+    deadline = time.monotonic() + (GEOCODE_BUDGET_S if budget is None else budget)
+    for candidate in _geocode_variants(query):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0.5:
+            break              # not enough left to be worth a request
+        hit, answered = _nominatim(candidate, timeout=min(10.0, remaining))
+        if hit:
+            return hit
+        if not answered:
+            break              # the service is unreachable, not ignorant
+    return None
 
 
 # Geoapify's place taxonomy has no 1:1 Overpass equivalent, so the fallback

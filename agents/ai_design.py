@@ -228,7 +228,6 @@ Business details:
             "{{GREETING}}": greeting,
             "{{SENDER}}": sender_name,
             "{{WHATSAPP}}": whatsapp,
-            "{{ACTIVATION}}": email_copy.ACTIVATION_PHONE,
             "{{OFFER}}": email_copy.OFFER,
             "{{FLYER_LINE}}": email_copy.FLYER_LINE,
             "{{CTA}}": email_copy.cta(whatsapp),
@@ -248,30 +247,53 @@ Business details:
 
 Context about this business & goal:{profile_section}{industry_section}{icp_section}{learning_section}{web_section}"""
 
-        result = ai_engine.generate_json(prompt)
-        if not (result and result.get("subject")):
-            raise ValueError("AI email generation failed: empty or malformed response")
+        def finalize(raw: dict) -> dict:
+            """Compose the sendable draft from the model's issue paragraph.
 
-        # Keep the model's researched issue; compose the rest deterministically
-        # so the offer, flyer line, CTA and sign-off are byte-exact every time.
-        issue = str(result.get("issue") or "").strip()
-        if not issue:
-            text = str(result.get("body") or "").strip()
-            if text.lower().startswith(greeting.lower()):
-                text = text[len(greeting):].strip()
-            issue = text.split("\n\n")[0].strip()
-        if not issue:
-            raise ValueError("AI email generation failed: no issue paragraph")
+            The offer, flyer line, CTA, sign-off and opt-out are byte-exact
+            here, so a model that paraphrases them cannot change what we say.
+            """
+            if not (raw and raw.get("subject")):
+                raise ValueError("AI email generation failed: empty or malformed response")
+            issue = str(raw.get("issue") or "").strip()
+            if not issue:
+                text = str(raw.get("body") or "").strip()
+                if text.lower().startswith(greeting.lower()):
+                    text = text[len(greeting):].strip()
+                issue = text.split("\n\n")[0].strip()
+            if not issue:
+                raise ValueError("AI email generation failed: no issue paragraph")
+            out = dict(raw)
+            out["greeting"] = greeting
+            out["hook"] = str(raw.get("hook") or issue.split(". ")[0].rstrip(".") + ".").strip()
+            out["body"] = email_copy.compose_body(
+                issue, greeting=greeting, sender=sender_name, whatsapp=whatsapp)
+            out.setdefault("issue_basis", "category-level")
+            out.setdefault("issue_evidence", "")
+            if out["issue_basis"] == "category-level" and not out.get("issue_note"):
+                out["issue_note"] = email_copy.CATEGORY_LEVEL_NOTE.format(
+                    issue=category or "institution type")
+            return out
 
-        result["greeting"] = greeting
-        result["hook"] = str(result.get("hook") or issue.split(". ")[0].rstrip(".") + ".").strip()
-        result["body"] = email_copy.compose_body(
-            issue, greeting=greeting, sender=sender_name, whatsapp=whatsapp)
-        result.setdefault("issue_basis", "category-level")
-        result.setdefault("issue_evidence", "")
-        if result["issue_basis"] == "category-level" and not result.get("issue_note"):
-            result["issue_note"] = email_copy.CATEGORY_LEVEL_NOTE.format(
-                issue=category or "institution type")
+        result = finalize(ai_engine.generate_json(prompt))
+
+        # The gate: a draft that is too long, too salesy or missing the opt-out
+        # gets one regeneration with the exact problems attached. Still failing
+        # and it raises, which sends the caller to the template drafter -- a bad
+        # email is never handed to the review screen looking finished.
+        from . import email_lint
+        problems = email_lint.lint(result.get("subject", ""), result["body"])
+        if problems:
+            retry_prompt = (
+                f"{prompt}\n\n## Your previous draft failed these checks\n"
+                + "\n".join(f"- {p}" for p in problems)
+                + "\nRewrite it once and fix every one of them. "
+                  "Return ONLY the JSON object."
+            )
+            result = finalize(ai_engine.generate_json(retry_prompt))
+            problems = email_lint.lint(result.get("subject", ""), result["body"])
+        if problems:
+            raise ValueError("draft failed the email gate: " + "; ".join(problems[:4]))
 
         result["to"] = payload.get("email", "")
         result["ai_powered"] = True

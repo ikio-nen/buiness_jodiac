@@ -11,9 +11,10 @@ Vocabulary rule: we sell *licensed seats* on the All Apps Education Plan.
 The word "keys" is grey-market language and never appears in an email.
 """
 
+import re
+
 SENDER = "Autodesk Educational Solutions"
 WHATSAPP = "+91 6296 142368"
-ACTIVATION_PHONE = "+91 93829 64017"
 
 # Last resort only: a real contact name wins, then the institution's own name.
 DEFAULT_GREETING = "Dear Team,"
@@ -33,33 +34,31 @@ def greeting_for(contact_name: str = "", business_name: str = "") -> str:
         return f"Dear {business_name.strip()},"
     return DEFAULT_GREETING
 
+# ── The body, in the order a person would write it ──────────────────
+# Three short paragraphs and one question. The old deck stacked an offer, a
+# flyer note, a CTA that asked for three different things and a four-line
+# signature, which read as a pitch deck rather than a letter.
 OFFER = (
-    "We provide official Autodesk Education access through the All Apps "
-    "Education Plan, with licensed seats at per-seat institute pricing. This "
-    "includes AutoCAD along with 40+ Autodesk applications such as Revit, "
-    "Fusion 360, Maya, 3ds Max, Inventor and Civil 3D, with 3-year coverage and "
-    "activation directly on email."
+    "We supply official Autodesk Education seats \u2014 AutoCAD plus 40+ apps on "
+    "a 3-year term \u2014 activated on your institution's own email."
 )
 
-FLYER_LINE = (
-    "I have attached the promotional flyer with complete details, including the "
-    "plan features and pricing of \u20b95,000 for 3 years."
-)
+FLYER_LINE = "I have attached the flyer with the plan details and the pricing."
 
 CTA_TEMPLATE = (
-    "You can reply to this email, or message me on WhatsApp at {whatsapp}. "
-    "For instant activation, license queries and payment details, you can also "
-    "reach us on Phone / WhatsApp at {activation}, as mentioned in the attached "
-    "flyer. If you would prefer to meet, we can schedule a short meeting at a "
-    "time that is convenient for you."
+    "Would a short price sheet for your next batch be useful? "
+    "Reply here, or message me on WhatsApp at {whatsapp}."
 )
 
-SIGN_OFF_TEMPLATE = (
-    "Best regards,\n"
-    "{sender}\n"
-    "WhatsApp: {whatsapp}\n"
-    "Phone / WhatsApp (activation): {activation}"
-)
+SIGN_OFF_TEMPLATE = "Regards,\n{sender} | {whatsapp}"
+
+# One line, always present: the linter fails any draft without it.
+OPT_OUT = ('If this is not relevant, reply "no thanks" and I will not contact '
+           'you again.')
+
+# A first email is 60-110 words; the fixed blocks are ~55 of those, so the
+# researched issue paragraph is capped here rather than left to the model.
+MAX_ISSUE_WORDS = 45
 
 # Category-level issue lines. Used only when research produced no concrete
 # institution-specific issue -- the draft's metadata must say so.
@@ -104,17 +103,15 @@ CATEGORY_LEVEL_NOTE = (
 )
 
 
-def cta(whatsapp: str = "", activation: str = "") -> str:
-    """The exact next-step paragraph: reply, WhatsApp, or a short meeting."""
-    return CTA_TEMPLATE.format(whatsapp=whatsapp or WHATSAPP,
-                               activation=activation or ACTIVATION_PHONE)
+def cta(whatsapp: str = "") -> str:
+    """The exact next-step paragraph: one question, one way to reply."""
+    return CTA_TEMPLATE.format(whatsapp=whatsapp or WHATSAPP)
 
 
-def sign_off(sender: str = "", whatsapp: str = "", activation: str = "") -> str:
-    """The exact four-line sign-off; never a placeholder sender."""
+def sign_off(sender: str = "", whatsapp: str = "") -> str:
+    """The exact two-line sign-off; never a placeholder sender."""
     return SIGN_OFF_TEMPLATE.format(sender=sender or SENDER,
-                                    whatsapp=whatsapp or WHATSAPP,
-                                    activation=activation or ACTIVATION_PHONE)
+                                    whatsapp=whatsapp or WHATSAPP)
 
 
 def issue_line(biz_name: str, category: str = "") -> str:
@@ -124,11 +121,32 @@ def issue_line(biz_name: str, category: str = "") -> str:
     return template.format(biz=biz_name)
 
 
+def fit_words(text: str, limit: int = MAX_ISSUE_WORDS) -> str:
+    """Trim a paragraph to `limit` words, keeping whole sentences.
+
+    Drops trailing sentences until the paragraph fits; a single over-long
+    sentence is cut at the word limit. Keeps every draft inside the length
+    target without letting the model decide how long the email is.
+    """
+    text = (text or "").strip()
+    if len(text.split()) <= limit:
+        return text
+    sentences = [s for s in re.split(r"(?<=[.!?])\s+", text) if s]
+    while sentences and len(" ".join(sentences).split()) > limit:
+        if len(sentences) == 1:
+            return " ".join(sentences[0].split()[:limit]).rstrip(",;:") + "."
+        sentences.pop()
+    kept = " ".join(sentences).strip()
+    return kept if kept else text
+
+
 def compose_body(issue: str, greeting: str = "", sender: str = "",
-                 whatsapp: str = "", activation: str = "") -> str:
-    """Issue-first body: greeting, issue, offer, flyer, exact CTA, sign-off."""
+                 whatsapp: str = "") -> str:
+    """The letter: greeting, the issue, the offer, one question, sign-off,
+    opt-out. The sender block carries one reachable contact."""
     return (
-        f"{greeting or DEFAULT_GREETING}\n\n{issue}\n\n{OFFER}\n\n{FLYER_LINE}"
-        f"\n\n{cta(whatsapp, activation)}\n\n"
-        f"{sign_off(sender, whatsapp, activation)}"
+        f"{greeting or DEFAULT_GREETING}\n\n{fit_words(issue)}"
+        f"\n\n{OFFER}\n\n{FLYER_LINE}"
+        f"\n\n{cta(whatsapp)}\n\n"
+        f"{sign_off(sender, whatsapp)}\n{OPT_OUT}"
     )

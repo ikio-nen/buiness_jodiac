@@ -1,0 +1,394 @@
+/* ═══════════════════════════════════════════════════════════════════
+   UI v2 — the Locations rail and the shell around it.
+
+   Delete the <link> to this file in index.html and the app returns to the
+   previous look exactly: everything here is visual, and the panel's DOM, ids
+   and classes are untouched so map.js/app.js keep working unchanged.
+
+   Why a separate layer: gp.css carries the palette and the frosted surfaces,
+   and it had grown a stack of ad-hoc overrides. This file establishes the
+   grid the panel was missing — a 384px rail, 16px gutters, one hairline
+   weight, one 18px section rhythm, and every control on a 28px height line.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── the rail ─────────────────────────────────────────────────── */
+
+.side-panel {
+  width: 384px !important;
+  background: linear-gradient(180deg, #1b0a10 0%, #120709 100%) !important;
+  border-right: 1px solid var(--line-warm) !important;
+  box-shadow: inset -1px 0 0 rgba(200, 161, 90, 0.06), 30px 0 80px rgba(0, 0, 0, 0.62) !important;
+}
+
+.side-head {
+  flex: 0 0 auto;
+  height: 46px;
+  padding: 0 16px;
+  gap: 10px;
+  border-bottom: 1px solid var(--line) !important;
+  background: rgba(200, 161, 90, 0.035);
+}
+
+.side-head b {
+  font-family: var(--dot-font, var(--display-font));
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--accent);
+}
+
+/* the close control sits on the same 28px line as every other button */
+.side-x {
+  width: 28px !important;
+  height: 28px !important;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line) !important;
+  color: var(--ink-soft) !important;
+  font-size: 14px !important;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+.side-x:hover {
+  color: #100608 !important;
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+
+.side-body {
+  padding: 16px !important;
+  gap: 18px !important;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(200, 161, 90, 0.35) transparent;
+}
+
+.side-body::-webkit-scrollbar { width: 8px; }
+.side-body::-webkit-scrollbar-thumb { background: rgba(200, 161, 90, 0.3); }
+
+/* ── section headings: label, hairline, action ─────────────────── */
+
+.side-sec { display: grid; gap: 8px; }
+
+.side-sec h4 {
+  margin: 0 !important;
+  min-height: 18px;
+  align-items: center;
+  font-family: var(--mono-font);
+  font-size: 9.5px !important;
+  line-height: 1 !important;
+  letter-spacing: 0.2em !important;
+  color: var(--ink-soft) !important;
+  gap: 10px;
+}
+
+/* the rule between label and action is what makes the sections read as one
+   document rather than separate boxes */
+.side-sec h4::after {
+  content: "";
+  order: 1;
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.side-sec h4 > * { order: 2; }
+
+.sec-act {
+  font-size: 9.5px !important;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  text-decoration: none !important;
+  padding: 2px 0 !important;
+  border-bottom: 1px solid transparent;
+}
+
+.sec-act:hover {
+  color: var(--accent) !important;
+  border-bottom-color: var(--accent);
+}
+
+/* ── map ──────────────────────────────────────────────────────── */
+
+.map-wrap {
+  height: 262px !important;
+  border: 1px solid var(--line-warm) !important;
+}
+
+.map-zoom {
+  top: 8px !important;
+  right: 8px !important;
+  display: grid;
+  gap: 1px;
+  background: var(--line-warm);
+  border: 1px solid var(--line-warm);
+}
+
+.map-zoom button {
+  width: 26px !important;
+  height: 26px !important;
+  background: rgba(10, 6, 8, 0.9) !important;
+  color: var(--ink) !important;
+  border: 0 !important;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.map-zoom button:hover {
+  background: var(--accent) !important;
+  color: #100608 !important;
+}
+
+.map-foot {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 6px;
+  font-family: var(--mono-font);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft);
+}
+
+.map-hint {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-attrib { flex: 0 0 auto; color: var(--ink-soft); }
+.map-attrib:hover { color: var(--accent); }
+
+/* ── pin cards ────────────────────────────────────────────────── */
+
+.pin-list { gap: 8px !important; }
+
+/* Flex, not grid: the row has five children in a fixed order (name, close,
+   meta, two actions) and auto-placement in a 2-column grid pushed each action
+   onto its own line. Wrapping does what the card actually wants. */
+.pin-row {
+  display: flex !important;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px !important;
+  padding: 9px 10px !important;
+  border: 1px solid var(--line) !important;
+  border-left: 2px solid transparent;
+  background: rgba(255, 250, 251, 0.028) !important;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.pin-row .pin-label { flex: 1 1 auto; order: 1; }
+.pin-row .pin-del { flex: 0 0 26px; order: 2; }
+/* its own line, so the two actions below it always share one */
+.pin-row .pin-meta { flex: 1 0 100%; order: 3; }
+.pin-row .pin-hunt { order: 4; }
+
+.pin-row:hover {
+  border-color: var(--line-warm) !important;
+  border-left-color: var(--accent);
+  background: rgba(200, 161, 90, 0.05) !important;
+}
+
+.pin-label {
+  font-size: 13px !important;
+  letter-spacing: 0.01em;
+  min-width: 0;
+  text-overflow: ellipsis;
+}
+
+.pin-del {
+  width: 26px !important;
+  height: 26px !important;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line) !important;
+  color: var(--ink-soft) !important;
+}
+
+.pin-del:hover {
+  color: #100608 !important;
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+
+.pin-meta {
+  font-family: var(--mono-font) !important;
+  font-size: 9.5px !important;
+  letter-spacing: 0.1em !important;
+  text-transform: uppercase;
+  color: var(--ink-soft) !important;
+}
+
+/* the two actions share one line: same height, same gap, same type */
+.pin-hunt {
+  height: 28px !important;
+  padding: 0 9px !important;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono-font) !important;
+  font-size: 9.5px !important;
+  letter-spacing: 0.08em !important;
+  text-transform: uppercase;
+  border: 1px solid var(--line) !important;
+  color: var(--ink) !important;
+  background: rgba(255, 250, 251, 0.02) !important;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+
+.pin-hunt:hover:not(:disabled) {
+  border-color: var(--accent) !important;
+  color: var(--accent) !important;
+  background: rgba(200, 161, 90, 0.08) !important;
+}
+
+.pin-hunt:disabled {
+  color: var(--ink-soft) !important;
+  border-color: var(--line) !important;
+  opacity: 0.55;
+}
+
+/* lead list inside a card: mono meta, hairline between rows */
+.pin-leads {
+  border: 1px solid var(--line) !important;
+  background: #150a0e !important;
+}
+
+.pin-leads > summary {
+  padding: 7px 10px !important;
+  font-family: var(--mono-font) !important;
+  font-size: 9.5px !important;
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase;
+  color: var(--ink-soft) !important;
+}
+
+.pin-leads ul { margin: 0 !important; padding: 0 !important; }
+
+.pin-leads li {
+  display: grid !important;
+  gap: 2px;
+  padding: 7px 10px !important;
+  border-top: 1px solid var(--line);
+}
+
+.pin-leads li b {
+  font-size: 12px !important;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.pin-leads .lead-meta {
+  font-family: var(--mono-font) !important;
+  font-size: 9.5px !important;
+  letter-spacing: 0.04em;
+  color: var(--ink-soft) !important;
+}
+
+/* ── run form: one column rhythm, three equal number fields ────── */
+
+.side-sec .fld {
+  display: grid;
+  /* an auto column grows to the input's intrinsic ~230px and blows out of a
+     108px cell, so the track is pinned to the cell and the field to the track */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 4px;
+  min-width: 0;
+}
+
+.side-sec .fld span {
+  font-family: var(--mono-font) !important;
+  font-size: 9px !important;
+  letter-spacing: 0.16em !important;
+  text-transform: uppercase;
+  color: var(--ink-soft) !important;
+}
+
+.side-sec .fld input[type="text"],
+.side-sec .fld input[type="number"] {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 32px !important;
+  padding: 0 9px !important;
+  box-sizing: border-box;
+  font-family: var(--mono-font) !important;
+  font-size: 11.5px !important;
+  color: var(--ink) !important;
+  background: rgba(9, 5, 7, 0.85) !important;
+  border: 1px solid var(--line) !important;
+}
+
+.side-sec .fld input:focus {
+  border-color: var(--accent) !important;
+  outline: none !important;
+  box-shadow: inset 0 0 0 1px rgba(200, 161, 90, 0.35) !important;
+}
+
+.fld-3 {
+  display: grid !important;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px !important;
+}
+
+.fld-3 input[type="number"] { text-align: right; }
+
+.side-sec .chk {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  font-family: var(--mono-font) !important;
+  font-size: 9.5px !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft) !important;
+}
+
+.side-sec .chk input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.side-panel .btn-run {
+  height: 38px !important;
+  margin-top: 2px;
+  font-family: var(--mono-font) !important;
+  font-size: 10px !important;
+  letter-spacing: 0.22em !important;
+  text-transform: uppercase;
+  background: var(--accent) !important;
+  color: #100608 !important;
+  border: 1px solid var(--accent) !important;
+  transition: filter 0.15s;
+}
+
+.side-panel .btn-run:hover { filter: brightness(1.08); }
+
+/* ── log: the one place in the panel allowed to be dense ───────── */
+
+.map-log {
+  max-height: 132px;
+  overflow-y: auto;
+  padding: 8px 0 0 !important;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono-font) !important;
+  font-size: 10px !important;
+  line-height: 1.65 !important;
+  letter-spacing: 0.02em;
+  color: var(--ink-soft) !important;
+  scrollbar-width: thin;
+}
+
+.map-log > *:first-child { color: var(--accent) !important; }
+
+/* ── narrow viewport: the rail is the whole screen, so it gets air ── */
+
+@media (max-width: 720px) {
+  .side-panel { width: 100% !important; }
+  .side-body { padding: 14px !important; gap: 16px !important; }
+  .map-wrap { height: 240px !important; }
+}

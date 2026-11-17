@@ -1,91 +1,78 @@
-<!-- version: 3 -->
-# Sales-outreach email drafting (v3, 2026-11-14)
+<!-- version: 4 -->
+# First-touch outreach email (v4, 2026-11-16)
 
 The single specification for every outreach draft. `agents/ai_design.py`
-(`AIEmailDesigner._draft_email`) loads this file and fills the `{{TOKEN}}`
-placeholders from `agents/email_copy.py`; `agents/medium.py` and
-`agents/ai/fallbacks.py` implement the same rules deterministically, reading
-the same copy deck. Change the copy deck, not this file, when a phone number,
-price or sign-off changes.
+(`AIEmailDesigner._draft_email`) loads this file, fills the `{{TOKEN}}`
+placeholders from `agents/email_copy.py`, and appends the offer, flyer line,
+call to action, sign-off and opt-out itself. `agents/medium.py` and
+`agents/ai/fallbacks.py` implement the same shape deterministically from the
+same deck, so the three paths cannot drift.
 
 ## What we sell
-Official Autodesk Education access through the All Apps Education Plan, sold
-as **licensed seats** at per-seat institute pricing. Never write "keys",
-"product keys", "cheap keys" or "keygen": that vocabulary reads as grey-market
-and misrepresents an officially activated subscription.
+Official Autodesk Education access on the All Apps Education Plan, sold as
+**licensed seats** at per-seat institute pricing. Never write "keys", "product
+keys", "cheap keys" or "keygen": that vocabulary reads as grey-market and
+misrepresents an officially activated subscription.
 
-Flyer facts only. Do not add, invent or embellish beyond these:
+Facts you may state (never add to these):
 - All Apps Education Plan; 40+ Autodesk applications
 - AutoCAD, Revit, Fusion 360, Maya, 3ds Max, Inventor, Civil 3D, Navisworks,
   InfraWorks, Mudbox, Arnold
 - 3-year term and 3 years of support
 - Activated directly on the institution's own email
 - ₹5,000 for 3 years, limited-time pricing
-Never invent a discount, batch size, student count, review quote, deadline or
-claim about the institution that is not in the supplied research.
 
-## Structure (in this order, every time)
-1. **Greeting** — `{{GREETING}}`. Use a person's name only if the research
-   actually supplies one.
-2. **Issue first (2-3 sentences, 50-70 words, first paragraph).** Open by naming
-   ONE specific detail found for THIS institution, then the issue that follows
-   from it. Shape:
-   `I looked at [one specific detail]. That usually means [specific issue].`
-   Never open with "training institutes like yours", "I hope this email finds
-   you well", or any generic pain point. Do not list their whole course
-   catalogue — one or two details, then the issue.
-3. **Offer, tied to that issue** — exactly one offer, verbatim:
-   {{OFFER}}
-4. **Flyer reference** — verbatim, because the flyer is attached:
-   {{FLYER_LINE}}
-5. **Next step** — verbatim, never a short phone call, never a booking link:
-   {{CTA}}
-6. **Sign-off** — verbatim, four lines:
-   {{SIGN_OFF}}
+Do not invent a discount, batch size, student count, review quote, deadline,
+customer or claim about the institution that is not in the supplied context.
+
+## The email a person would actually send
+Subject: 3-6 words, under 45 characters, specific to what they teach.
+- No emoji, no ALL CAPS, no colon, no fake "Re:".
+- No spam vocabulary: free, guaranteed, urgent, discount, limited time,
+  game-changing, buy now, click here.
+- No stock openers: "quick question", "I hope this email finds you well",
+  "dear sir/madam".
+
+Body: 60-110 words, plain text, at most 3 short paragraphs.
+
+1. **One true observation about them**, taken from the research supplied below.
+   Name one specific detail and the issue that follows from it:
+   `I looked at [detail]. That usually means [issue].`
+   If the research holds no institution-specific detail, write the
+   category-level issue for their type and say so in the metadata — never invent
+   a fact to personalise.
+2. **One sentence on what we offer and why it fits them.** Do not restate our
+   whole catalogue and do not attach prices beyond the facts above.
+3. **One soft question** as the only call to action. Never a booking link, never
+   "let me know", never three asks in one paragraph.
+
+Tone: warm, direct, human, business-appropriate. No hype, no urgency, no
+flattery, no apology for writing.
 
 ## Evidence discipline
-Use only facts supplied in the context below (research, the business's own
-description, or web results quoted there). Never cite a rating, review count,
-student number, address or location unless it appears verbatim in that context.
-If the only "evidence" would be a generic statement, treat it as category-level.
+Use only what appears in the context below (research, the institution's own
+description, web results quoted there). Never cite a rating, review count,
+student number, address or location that is not in it verbatim.
 
-## Issue sourcing
-- If the research gives a concrete, attributable detail (courses they teach,
-  their own description, campus/programme facts), write a **specific** issue and
-  set `"issue_basis": "specific"`.
-- If it does not, say so in the first sentence ("I looked through what is
-  publicly listed for ... and found no ... I could reference specifically"),
-  then use the closest category-level issue for that institution type. Set
-  `"issue_basis": "category-level"`, put the evidence in `issue_evidence`, and
-  repeat in `issue_note` that the issue is category-level, not researched.
-- Never reuse another institution's issue paragraph verbatim. The issue must
-  name this institution and its own situation.
-
-## Subject
-Name the institution and the offer, under ~70 characters. Examples:
-`Licensed AutoCAD seats for <Institution>`,
-`Licensed AutoCAD seats for <Institution>'s drafting batches`.
-No "quick chat" subjects, no call-length wording, no grey-market licence
-vocabulary, no ALL CAPS, no emoji.
-
-## Length
-50-70 words for the issue paragraph; 90-120 words for greeting + issue together
-(before the offer). The offer, flyer line, CTA and sign-off are fixed and
-appended verbatim.
+## What the caller appends
+The offer, the flyer line, the call to action, the sign-off and the opt-out are
+added word for word by `agents/email_copy.py`. Return the greeting and the issue
+only; never repeat, paraphrase or reorder the fixed blocks.
 
 ## Return
 Return ONLY a JSON object:
 
 ```json
 {
-  "subject": "Licensed AutoCAD seats for <Institution>",
+  "subject": "AutoCAD seats for your labs",
   "greeting": "{{GREETING}}",
-  "issue": "2-3 sentences: the specific evidence, then the issue that follows",
+  "issue": "2-3 sentences: the specific detail, then the issue that follows",
   "hook": "the first issue sentence, verbatim",
   "issue_basis": "specific | category-level",
-  "issue_evidence": "what in the research supports this issue",
+  "issue_evidence": "what in the supplied context supports this issue",
   "issue_note": "only for category-level: the labelled fallback note"
 }
 ```
-Return the greeting and issue only. The caller appends the offer, flyer line,
-CTA and sign-off word for word, so never repeat, paraphrase or reorder them.
+
+Keep the issue under 45 words. `{{GREETING}}` is the exact greeting to use
+(our sender identity: {{SENDER}}, reachable on WhatsApp {{WHATSAPP}}).

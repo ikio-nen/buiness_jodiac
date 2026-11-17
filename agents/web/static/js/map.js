@@ -561,11 +561,18 @@ function logLine(txt) {
   box.scrollTop = box.scrollHeight;
 }
 
-async function apiSearch(location, radius, category) {
+async function apiSearch(location, radius, category, pin) {
+  // The pin's coordinates travel with the request. Naming the place was not
+  // enough: a Kolkata locality called "Simla" geocoded to Shimla, and the
+  // round searched a different town. The map knows where the pin is.
   const r = await fetch('/api/map/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ location, radius, category }),
+    body: JSON.stringify({
+      location, radius, category,
+      lat: pin ? pin.lat : undefined,
+      lon: pin ? pin.lon : undefined,
+    }),
   });
   return r.json();
 }
@@ -642,7 +649,7 @@ async function runPin(pin) {
     logLine(`${pin.label || 'pin'} · round ${round} · ${(radius / 1000).toFixed(1)} km`);
     let data;
     try {
-      data = await apiSearch(loc, radius, category);
+      data = await apiSearch(loc, radius, category, pin);
     } catch (e) {
       logLine(`  failed: ${e.message}`);
       return;
@@ -654,7 +661,15 @@ async function runPin(pin) {
     pin.leads += fresh.length;
     persist();
     renderPinList();
-    logLine(`  kept ${data.kept} · new ${fresh.length} · total ${pin.leads}`);
+    logLine(`  found ${data.raw || 0} · kept ${data.kept || 0} · new ${fresh.length}
+      · total ${pin.leads}${data.web_added ? ` · ${data.web_added} from the web` : ''}`);
+    // Zero kept is three different facts: nothing here, everything vetoed, or
+    // everything filtered by the phrase. The report says which one.
+    if (!(data.rows || []).length && data.raw) {
+      logLine(data.report
+        ? `  none kept: ${data.report}`
+        : '  none kept: every place failed the fit check for what we sell');
+    }
     if (!grow) return;
     if (pin.leads >= target || !(data.rows || []).length) return;
     radius = Math.round(radius * GROWTH);

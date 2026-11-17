@@ -49,25 +49,25 @@ HOOKS_BY_GOAL = {
 }
 
 SUBJECTS_BY_GOAL = {
+    # Subjects stay under 45 characters and 3-6 words: a long institution name
+    # in the subject line is what used to push every draft past the mobile cut
+    # and read like a mailshot. The body names the institution instead.
     "cad_licensing": (
-        "Licensed AutoCAD seats for {biz}",
-        "Licensed AutoCAD seats for {biz}'s student batches",
-        "Per-seat AutoCAD licensing for {biz}",
-        "Institutional AutoCAD licensing for {biz}",
-        "Licensing question for {biz}'s next batch",
+        "AutoCAD seats for your labs",
+        "Licensing for your next CAD batch",
+        "CAD seats at education pricing",
+        "A licensing question for your batch",
     ),
     "website": (
-        "A website for {biz}",
-        "Quick idea for {biz}'s online presence",
-        "Found {biz} online - a thought on your site",
-        "{biz} + a modern website = more enquiries",
-        "A thought on {biz}'s website",
+        "A website for your institute",
+        "An idea for your online presence",
+        "Your institute's next enquiry",
+        "Found you online - an idea",
     ),
     "custom": (
-        "{product} for {biz}",
-        "Quick idea for {biz}",
-        "Saw {biz} - had an idea to share",
-        "An idea about {product} for {biz}",
+        "An idea for your institute",
+        "A note about your next batch",
+        "A thought on your lab setup",
     ),
 }
 
@@ -229,14 +229,18 @@ class MediumAgent(BaseAgent):
                 extra_meta["issue_note"] = issue_note
         else:
             greeting = email_copy.greeting_for(contact_name, biz_name)
-            body = f"""{greeting}
-
-{hook}{pain_section}
-
-We supply {product} for institutions. {value_prop}{memory_section}
-{email_copy.cta(whatsapp)}
-
-{email_copy.sign_off(sender_name, whatsapp)}"""
+            # Same short letter as the CAD path: observation, one sentence about
+            # us, one question, sign-off, opt-out. Memory lines are trimmed to
+            # the first one so the template cannot sprawl past the length gate.
+            fact = memory_lines[0] if memory_lines else ""
+            body = (
+                f"{greeting}\n\n{hook}{pain_section}"
+                + (f"\n\n{fact}" if fact else "")
+                + f"\n\nWe supply {product} for institutions. {value_prop}"
+                + f"\n\n{email_copy.cta(whatsapp)}"
+                + f"\n\n{email_copy.sign_off(sender_name, whatsapp)}"
+                + f"\n{email_copy.OPT_OUT}"
+            )
             extra_meta = {}
 
         return {
