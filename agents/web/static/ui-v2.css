@@ -142,7 +142,11 @@
   display: flex;
   align-items: baseline;
   justify-content: space-between;
+  /* The credit line is longer than the hint, and the hint is the instruction:
+     let the credit drop to its own line rather than ellipsis the hint away. */
+  flex-wrap: wrap;
   gap: 12px;
+  row-gap: 2px;
   margin-top: 6px;
   font-family: var(--mono-font);
   font-size: 9.5px;
@@ -157,7 +161,7 @@
   white-space: nowrap;
 }
 
-.map-attrib { flex: 0 0 auto; color: var(--ink-soft); }
+.map-attrib { flex: 0 0 auto; margin-left: auto; color: var(--ink-soft); }
 .map-attrib:hover { color: var(--accent); }
 
 /* ── pin cards ────────────────────────────────────────────────── */

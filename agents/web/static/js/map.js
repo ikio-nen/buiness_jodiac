@@ -13,6 +13,10 @@ const TILE_URL = 'https://tile.openstreetmap.org/';
 const STORE_KEY = 'jarvis.map.v1';
 const GROWTH = 1.4;
 
+// One line per session is enough: a blocked or offline basemap must not
+// fill the map log with one entry per tile.
+let tileFailedLogged = false;
+
 const state = {
   lat: 22.5726,          // Kolkata
   lon: 88.3639,
@@ -70,6 +74,19 @@ function renderTiles() {
       img.className = 'map-tile';
       img.alt = '';
       img.draggable = false;
+      // OSM's tile policy requires a Referer from web pages, and the app sends
+      // `Referrer-Policy: no-referrer` document-wide (the launch token must
+      // never travel in a URL). This per-element policy re-adds the origin for
+      // the tile requests only: `Referer: http://127.0.0.1:8765/`. It must be
+      // set before `src`, or the request has already started without it.
+      img.referrerPolicy = 'origin';
+      img.addEventListener('error', () => {
+        img.remove();
+        if (!tileFailedLogged) {
+          tileFailedLogged = true;
+          logLine('basemap unavailable - tiles did not load; pins still work');
+        }
+      });
       img.src = `${TILE_URL}${z}/${((tx % max) + max) % max}/${ty}.png`;
       img.style.left = `${tx * 256 - ox}px`;
       img.style.top = `${ty * 256 - oy}px`;
