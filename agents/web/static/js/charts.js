@@ -16,11 +16,12 @@ function esc(text) {
   ));
 }
 
-function attrs(map) {
-  return Object.entries(map)
-    .filter(([, v]) => v !== undefined && v !== null && v !== '')
-    .map(([k, v]) => `${k}="${esc(v)}"`)
-    .join(' ');
+// SVG text has no ellipsis of its own: a long category name would run into
+// the bars. Clip to the label gutter and keep the full text in a tooltip.
+function fitLabel(text, px, size = 12) {
+  const s = String(text ?? '');
+  const max = Math.max(3, Math.floor(px / (size * 0.6)));
+  return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }
 
 export const TONE = {
@@ -54,8 +55,9 @@ export function hBars(rows, opts = {}) {
     const tone = TONE[r.tone] || r.tone || TONE.accent;
     return `
       <g class="chart-row">
+        <title>${esc(r.label)}: ${fmt(v)}</title>
         <text class="chart-label" x="${labelW - 8}" y="${y + rowH / 2 + 4}"
-              text-anchor="end">${esc(r.label)}</text>
+              text-anchor="end">${esc(fitLabel(r.label, labelW - 14))}</text>
         <rect class="chart-track" x="${labelW}" y="${y + 5}"
               width="${barMax}" height="${rowH - 10}" rx="2"></rect>
         <rect class="chart-bar" x="${labelW}" y="${y + 5}"
@@ -143,8 +145,9 @@ export function funnel(stages, opts = {}) {
     const share = top ? Math.round((v / top) * 100) : 0;
     return `
       <g class="chart-row">
+        <title>${esc(s.label)}: ${fmt(v)}</title>
         <text class="chart-label" x="${labelW - 8}" y="${y + rowH / 2 + 4}"
-              text-anchor="end">${esc(s.label)}</text>
+              text-anchor="end">${esc(fitLabel(s.label, labelW - 14))}</text>
         <rect class="chart-track" x="${labelW}" y="${y + 4}"
               width="${barMax}" height="${rowH - 8}" rx="2"></rect>
         <rect class="chart-bar" x="${labelW}" y="${y + 4}"

@@ -4972,3 +4972,12 @@ keyframes at-boot-hide { to { opacity: 0; visibility: hidden; } }
 .chart-head { margin-top: 12px; font-family: var(--pixel-font); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-soft); }
 .chart-note { font-size: 12px; color: var(--ink-soft); }
 .status-charts { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
+
+/* Drawers never grow past the window. The status panel is fixed, so a list
+   of stats plus charts used to run off the bottom edge with no scrollbar:
+   the charts at the end were simply unreachable. Cap it and let the body
+   scroll under a header that stays put. */
+.status-panel { max-height: calc(100vh - 74px); }
+.status-panel.open { display: flex; flex-direction: column; }
+.status-panel .status-panel-header { flex: 0 0 auto; }
+.status-panel .status-content { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }

@@ -12,14 +12,14 @@
 // tag: bump both together or a browser keeps serving an old module.
 import { esc, setActivity, clearActivityIfIdle, showQueuedChip, setWorkActive,
          settleActivity, wrapAgentEvent } from './js/util.js?v=80';
-import { vtAppend, vtSwap } from './js/transitions.js?v=80';
+import { vtAppend, vtSwap } from './js/transitions.js?v=81';
 import { initQueue, renderQueue } from './js/queue.js?v=80';
 import { initAttachments, takeAttachment } from './js/attachments.js?v=80';
 import { initDictation } from './js/voice.js?v=80';
 import { initMusicCorner } from './js/music.js?v=80';
 import { renderChecklist, renderInterview, removeChecklistCard } from './js/campaign.js?v=80';
 import { initVault } from './js/vault.js?v=80';
-import { hBars, donut, funnel, statTiles, legend, fmt } from './js/charts.js?v=82';
+import { hBars, donut, funnel, statTiles, legend, fmt } from './js/charts.js?v=83';
 
 // ── Auth: the launch cookie, not a token in the page ──────────────
 // The server trades the launch URL for an HttpOnly SameSite=Strict cookie.
@@ -168,8 +168,7 @@ function addMessage(role, content, meta = {}) {
 
   msg.appendChild(label);
   msg.appendChild(body);
-  vtAppend(messagesEl, msg);
-  scrollToBottom();
+  vtAppend(messagesEl, msg, scrollToBottom);
 }
 
 
@@ -251,8 +250,11 @@ function makeActivatable(el) {
 // upscaled by CSS would magnify every label along with the bars.
 function chartWidth() {
   const el = document.getElementById('messages');
-  const avail = (el ? el.clientWidth : 640) - 56;
-  return Math.max(300, Math.min(720, avail));
+  // A card sits inside the message list's 44px side padding, then its own
+  // 32px padding and 2px border. Drawing at the column width made every SVG
+  // scale down inside the card, shrinking the 12px labels with it.
+  const column = Math.min(720, (el ? el.clientWidth : 640) - 44);
+  return Math.max(240, column - 34);
 }
 
 function renderSearchResults(data) {
@@ -390,7 +392,7 @@ function renderSendResults(data) {
 
 /* The directory dashboard: the durable record, charted. Shared by the
    status panel and the dashboard chip so the two can never disagree. */
-function directoryCharts(dir) {
+function directoryCharts(dir, width = chartWidth()) {
   const stats = (dir && dir.stats) || {};
   const b = (dir && dir.breakdown) || {};
   const fit = (b.fit || []).map(r => ({
@@ -410,7 +412,7 @@ function directoryCharts(dir) {
     { value: fmt(stats.verified_contacts), label: 'verified' },
     { value: fmt(stats.sent), label: 'emails sent' },
   ]);
-  if (fit.length) html += hBars(fit, { title: 'Businesses by fit verdict', width: chartWidth() });
+  if (fit.length) html += hBars(fit, { title: 'Businesses by fit verdict', width });
   if (status.length) {
     html += `<div class="chart-split">`;
     html += donut(status, { centerLabel: 'emails', title: 'Email pipeline' });
@@ -418,8 +420,19 @@ function directoryCharts(dir) {
     html += `<div class="chart-note">${fmt(stats.drafts)} drafts · ${fmt(stats.failed)} failed</div></div></div>`;
   }
   if ((b.categories || []).length) {
-    html += hBars(b.categories.map(r => ({ label: r.label, value: r.value })),
-                  { title: 'Top categories', labelWidth: 132, width: chartWidth() });
+    // The database keys categories as slugs, and both "educational_institution"
+    // and "educational institution" can exist. Show one human label per
+    // category, top six by count, instead of a long tail of identical rows.
+    const cats = new Map();
+    b.categories.forEach(r => {
+      const label = String(r.label || '').replace(/_/g, ' ').trim();
+      if (label) cats.set(label, (cats.get(label) || 0) + (Number(r.value) || 0));
+    });
+    const rows = [...cats].sort((x, y) => y[1] - x[1]).slice(0, 6)
+      .map(([label, value]) => ({ label, value }));
+    if (rows.length) {
+      html += hBars(rows, { title: 'Top categories', labelWidth: 124, width });
+    }
   }
   return html;
 }
@@ -468,8 +481,9 @@ function appendCard(html) {
   const msg = document.createElement('div');
   msg.className = 'message message-jarvis';
   msg.innerHTML = `<div class="msg-label">JARVIS</div>${html}`;
-  vtAppend(messagesEl, msg);
-  scrollToBottom();
+  // Scroll after the node is in the DOM: a tall card appended inside the
+  // view-transition callback used to leave the chat parked above it.
+  vtAppend(messagesEl, msg, scrollToBottom);
   return msg;
 }
 
@@ -1748,7 +1762,12 @@ statusBtn.addEventListener('click', async () => {
         const dirRes = await fetch('/api/directory');
         const dir = await dirRes.json();
         const slot = document.getElementById('statusCharts');
-        if (slot && !dir.error) slot.innerHTML = directoryCharts(dir);
+        if (slot && !dir.error) {
+          // The panel is ~320px wide, not the chat column: measure the panel
+          // so its charts keep 12px labels instead of scaling a wide SVG down.
+          const panelWidth = Math.max(260, Math.min(560, (statusContent.clientWidth || 296) - 24));
+          slot.innerHTML = directoryCharts(dir, panelWidth);
+        }
       } catch (e) { /* the session rows above still stand */ }
     } catch (e) {
       statusContent.innerHTML = '<div style="color:var(--red-bad);">Failed to load status</div>';

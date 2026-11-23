@@ -6,9 +6,20 @@
 
 export const vtSupported = typeof document.startViewTransition === 'function';
 
-export function vtAppend(parent, el) {
-  if (!vtSupported) { parent.appendChild(el); return; }
-  document.startViewTransition(() => parent.appendChild(el));
+// `after` runs once the node is actually in the DOM. The view-transition
+// callback is not synchronous, so callers that measure or scroll the new
+// content (scroll-to-bottom after a tall result card) must use it instead of
+// running straight after vtAppend and measuring the old layout.
+export function vtAppend(parent, el, after) {
+  if (!vtSupported) {
+    parent.appendChild(el);
+    if (after) after();
+    return;
+  }
+  document.startViewTransition(() => {
+    parent.appendChild(el);
+    if (after) after();
+  });
 }
 
 export function vtSwap(showEl, hideEls) {
