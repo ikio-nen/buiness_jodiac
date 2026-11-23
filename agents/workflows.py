@@ -283,6 +283,8 @@ def _remember_fit(businesses: list[dict], goal: dict = None) -> None:
                     "goal": goal_label or verdict.get("goal", ""),
                     **({"email": biz["email"]} if biz.get("email") else {}),
                     **({"phone": biz["phone"]} if biz.get("phone") else {}),
+                    "website": biz.get("website", ""),
+                    "location": biz.get("address") or biz.get("location", ""),
                 },
                 source="search",
             )
@@ -612,29 +614,24 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
                 get_brain().learn_business(
                     biz["name"],
                     category=category,
-                    facts={"email": draft.get("to", "")},
+                    facts={
+                        "email": draft.get("to", ""),
+                        "website": biz.get("website", ""),
+                        "phone": biz.get("phone", ""),
+                        "location": biz.get("location", ""),
+                    },
                     interaction={"type": "drafted", "detail": draft.get("subject", "")[:80]},
                     source="draft",
                 )
             except Exception:
                 pass
-            # Record the draft against its business in the directory.
+            # The brain mirror above already wrote the business row.
             try:
                 from agents import store
-                biz_id = store.upsert_business("", {
-                    "name": biz.get("name", ""),
-                    "category": category,
-                    "location": biz.get("location", ""),
-                    "website": biz.get("website", ""),
-                    "phone": biz.get("phone", ""),
-                    "email": draft.get("to", ""),
-                    "source": "draft",
-                })
                 store.save_email("", draft.get("to", ""),
                                  draft.get("subject", ""),
                                  draft.get("body", ""),
-                                 business_id=biz_id, kind="draft",
-                                 status="draft",
+                                 kind="draft", status="draft",
                                  business_name=biz.get("name", ""))
             except Exception:
                 pass

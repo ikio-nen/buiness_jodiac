@@ -3,6 +3,7 @@
 Sources of truth that predate the database:
 
     brain/businesses/*.json        -> businesses (one row per business, ever)
+    sessions/*/search_results.json -> businesses (fills website/address)
     contact_cache.json             -> contacts  (emails/phones the finder verified)
     sessions/*/email_drafts.json   -> emails    (status 'draft')
     emails/sent_ledger.jsonl       -> emails    (status 'sent')
@@ -82,6 +83,38 @@ def backfill_businesses() -> int:
             "source": "brain",
         }):
             touched += 1
+    return touched
+
+
+def backfill_search_fields() -> int:
+    """Fill website/address from session search results.
+
+    The brain's fit records carry the verdict but not the listing's website or
+    address, so those columns would otherwise stay empty. Existing values win.
+    """
+    touched = 0
+    for path in sorted(SESSIONS.glob("*/search_results.json")):
+        for biz in _read_json(path).get("businesses") or []:
+            if not isinstance(biz, dict) or not biz.get("name"):
+                continue
+            website = str(biz.get("website", "") or "")
+            location = str(biz.get("address", "") or biz.get("location", "") or "")
+            if not (website or location):
+                continue
+            try:
+                with db.connect() as conn:
+                    cur = conn.execute(
+                        "UPDATE businesses SET"
+                        " website = CASE WHEN website = '' THEN ? ELSE website END,"
+                        " location = CASE WHEN location = '' THEN ? ELSE location END,"
+                        " updated_at = ?"
+                        " WHERE name_norm = ?"
+                        "   AND ((? <> '' AND website = '') OR (? <> '' AND location = ''))",
+                        (website, location, db._now(), store.norm_name(biz["name"]),
+                         website, location))
+                    touched += cur.rowcount or 0
+            except Exception:
+                continue
     return touched
 
 
@@ -225,6 +258,7 @@ def run() -> dict:
     """Import everything, then return the resulting counts."""
     touched = {
         "businesses": backfill_businesses(),
+        "search_fields": backfill_search_fields(),
         "contacts": backfill_contacts(),
         "drafts": backfill_drafts(),
         "sent": backfill_sent(),

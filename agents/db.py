@@ -5,10 +5,10 @@ WAL mode for concurrent CLI + WebSocket access — the same pattern as
 ``chat_memory.py``. Every public function opens its own short-lived
 connection: no shared-connection threading hazards, no connection healing.
 
-Tables (v1): ``businesses`` (discovered + scored businesses per session),
-``emails`` (drafts + sent outreach), ``sessions`` (registry), ``usage``
-(per AI call, including which provider served it — the grading feed for the
-provider cascade).
+Tables: ``businesses`` (the directory), ``contacts`` (every channel known
+for a business), ``emails`` (drafts + sent outreach), ``sessions``
+(registry), ``usage`` (per AI call, including which provider served it —
+the grading feed for the provider cascade).
 
 Migrations are idempotent and versioned in ``schema_migrations``. The DB is
 best-effort infrastructure: every writer wraps it so a DB failure degrades,
@@ -17,6 +17,7 @@ never blocks the pipeline.
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -50,7 +51,7 @@ def connect():
 # Callables receive the open connection, for steps that need PRAGMA checks
 # (SQLite has no ALTER TABLE ... ADD COLUMN IF NOT EXISTS).
 
-_MIGRATIONS: list[tuple[int, str]] = [
+_MIGRATIONS: list[tuple[int, str | Callable]] = [
     (1, """
     CREATE TABLE IF NOT EXISTS schema_migrations (
         version INTEGER PRIMARY KEY,
@@ -115,7 +116,6 @@ _MIGRATIONS: list[tuple[int, str]] = [
     CREATE INDEX IF NOT EXISTS idx_usage_cap ON usage(capability);
     CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage(provider);
     """),
-    (2, None),  # replaced below by _migration_2
 ]
 
 
@@ -184,23 +184,10 @@ def _migration_2(conn: sqlite3.Connection) -> None:
     UPDATE businesses SET name_norm = lower(trim(name)) WHERE name_norm = '';
     UPDATE businesses SET first_seen = created_at WHERE first_seen = '';
     UPDATE businesses SET last_seen = updated_at WHERE last_seen = '';
-
-    DROP VIEW IF EXISTS v_directory;
-    CREATE VIEW v_directory AS
-        SELECT b.id, b.name, b.name_norm, b.domain, b.category, b.location,
-               b.website, b.phone, b.email, b.fit_score, b.fit_verdict,
-               b.goal, b.times_seen, b.first_seen, b.last_seen,
-               (SELECT COUNT(*) FROM emails e
-                 WHERE e.business_id = b.id AND e.status = 'sent') AS sent_count,
-               (SELECT e.to_email FROM emails e
-                 WHERE e.business_id = b.id AND e.status = 'sent'
-                 ORDER BY e.id DESC LIMIT 1) AS last_sent_to
-          FROM businesses b;
     """)
 
 
-_MIGRATIONS = [(v, (_migration_2 if s is None else s))
-               for v, s in _MIGRATIONS]
+_MIGRATIONS.append((2, _migration_2))
 
 
 def migrate() -> int:

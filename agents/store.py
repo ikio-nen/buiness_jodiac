@@ -54,7 +54,8 @@ _BUSINESS_TEXT = (
 _BUSINESS_NUM = ("rating", "review_count", "lat", "lon", "fit_score")
 _BUSINESS_FIELDS = ("session_id", "ext_id") + _BUSINESS_TEXT + _BUSINESS_NUM
 # Columns whose empty value must never wipe a known one on update.
-_PRESERVE_EMPTY = {"name", "category", "location", "website", "phone", "email"}
+_PRESERVE_EMPTY = {"name", "category", "location", "website", "phone", "email",
+                   "domain", "goal", "fit_verdict", "fit_rationale"}
 
 
 def _business_params(session_id: str, data: dict) -> dict:
@@ -137,9 +138,6 @@ def upsert_business(session_id: str, data: dict) -> int:
                 "SELECT id FROM businesses WHERE session_id = ? AND ext_id = ?",
                 (session_id, p["ext_id"])).fetchone()
             row_id = row["id"] if row else 0
-        if row_id and (p["email"] or p["phone"]):
-            upsert_contact(row_id, email=p["email"], phone=p["phone"],
-                           domain=p["domain"], source=p["source"])
         return row_id
     except Exception:
         return 0
@@ -215,6 +213,11 @@ def upsert_contact(business_id: int = 0, email: str = "", phone: str = "",
     domain = (domain or domain_of(email)).strip().lower()
     if not (email or phone or whatsapp):
         return 0
+    if not domain:
+        # The unique key is (email, domain); two phone-only contacts would
+        # both be ('', '') and merge into one row. Give the number its own key.
+        digits = re.sub(r"\D", "", phone or whatsapp)
+        domain = f"phone:{digits[-10:]}" if digits else ""
     try:
         _db.migrate()
         now = _db._now()
@@ -317,8 +320,9 @@ def breakdown() -> dict:
                 out["fit"].append({"label": r["label"], "value": r["c"]})
             for r in conn.execute(
                     "SELECT CASE WHEN category = '' THEN 'uncategorised'"
-                    "             ELSE category END AS label, COUNT(*) c"
-                    " FROM businesses GROUP BY label ORDER BY c DESC LIMIT 8"):
+                    "             ELSE replace(category, '_', ' ') END AS label,"
+                    "       COUNT(*) c"
+                    " FROM businesses GROUP BY label ORDER BY c DESC LIMIT 6"):
                 out["categories"].append({"label": r["label"], "value": r["c"]})
             for r in conn.execute(
                     "SELECT status AS label, COUNT(*) c FROM emails"
@@ -353,6 +357,31 @@ def save_email(session_id: str, to_email: str, subject: str, body: str,
         _db.migrate()
         now = _db._now()
         with _db.connect() as conn:
+            if not business_id and business_name:
+                row = conn.execute(
+                    "SELECT id FROM businesses WHERE name_norm = ? LIMIT 1",
+                    (norm_name(business_name),)).fetchone()
+                business_id = row["id"] if row else 0
+            # A send or failure is the next state of an existing draft, not a
+            # second email. Reuse that row so one outreach is one row.
+            if status != "draft" and to_email:
+                row = conn.execute(
+                    "SELECT id FROM emails WHERE to_email = ? AND subject = ?"
+                    " AND status IN ('draft', 'failed')"
+                    " ORDER BY id DESC LIMIT 1",
+                    (to_email, subject)).fetchone()
+                if row:
+                    conn.execute(
+                        "UPDATE emails SET business_id = COALESCE(?, business_id),"
+                        " business_name = COALESCE(NULLIF(?, ''), business_name),"
+                        " body = ?, kind = ?, status = ?,"
+                        " provider = COALESCE(NULLIF(?, ''), provider),"
+                        " sent_at = ?, error = ?, updated_at = ? WHERE id = ?",
+                        (business_id or None, business_name or "", body,
+                         kind, status, provider,
+                         sent_at or (now if status == "sent" else ""),
+                         (error or "")[:400], now, row["id"]))
+                    return row["id"]
             cur = conn.execute(
                 "INSERT INTO emails (session_id, business_id, business_name,"
                 " kind, to_email, subject, body, status, provider, sent_at,"
@@ -441,12 +470,17 @@ def directory(limit: int = 0, where: str = "") -> list[dict]:
         sql = ("SELECT b.id, b.name, b.category, b.location, b.website,"
                " b.phone, b.email, b.domain, b.fit_score, b.fit_verdict,"
                " b.goal, b.times_seen, b.first_seen, b.last_seen,"
-               " (SELECT c.email FROM contacts c WHERE c.business_id = b.id"
-               "   AND c.email <> '' ORDER BY c.verified DESC, c.id LIMIT 1)"
-               "   AS best_email,"
+               " COALESCE(c.email, b.email) AS best_email,"
+               " c.verified AS email_verified, c.source AS email_source,"
                " (SELECT COUNT(*) FROM emails e WHERE e.business_id = b.id"
                "   AND e.status = 'sent') AS sent_count"
-               " FROM businesses b")
+               " FROM businesses b"
+               " LEFT JOIN ("
+               "   SELECT business_id, email, verified, source,"
+               "          ROW_NUMBER() OVER (PARTITION BY business_id"
+               "            ORDER BY verified DESC, id) AS rn"
+               "   FROM contacts WHERE email <> ''"
+               " ) c ON c.business_id = b.id AND c.rn = 1")
         if where:
             sql += f" WHERE {where}"
         sql += " ORDER BY b.fit_score DESC NULLS LAST, b.name"
@@ -477,13 +511,11 @@ def export_csv(path) -> int:
             for r in rows:
                 if not r.get("best_email"):
                     continue
-                contacts = contacts_for(r["id"])
-                hit = next((c for c in contacts
-                            if c.get("email") == r["best_email"]), {})
                 writer.writerow([r.get("name", ""), r.get("category", ""),
                                  r.get("location", ""), r["best_email"],
-                                 "yes" if hit.get("verified") else "no",
-                                 hit.get("source", ""), r.get("fit_score") or ""])
+                                 "yes" if r.get("email_verified") else "no",
+                                 r.get("email_source", ""),
+                                 r.get("fit_score") or ""])
                 written += 1
     except Exception:
         return 0
@@ -499,23 +531,20 @@ def stats() -> dict:
     try:
         _db.migrate()
         with _db.connect() as conn:
-            def one(sql, *args):
-                row = conn.execute(sql, args).fetchone()
-                return (row[0] if row else 0) or 0
-            out["businesses"] = one("SELECT COUNT(*) FROM businesses")
-            out["with_email"] = one(
-                "SELECT COUNT(*) FROM businesses WHERE email <> ''")
-            out["with_website"] = one(
-                "SELECT COUNT(*) FROM businesses WHERE website <> ''")
-            out["contacts"] = one("SELECT COUNT(*) FROM contacts")
-            out["verified_contacts"] = one(
-                "SELECT COUNT(*) FROM contacts WHERE verified = 1")
-            out["emails"] = one("SELECT COUNT(*) FROM emails")
-            out["drafts"] = one("SELECT COUNT(*) FROM emails WHERE status = 'draft'")
-            out["sent"] = one("SELECT COUNT(*) FROM emails WHERE status = 'sent'")
-            out["failed"] = one("SELECT COUNT(*) FROM emails WHERE status = 'failed'")
-            out["sessions"] = one("SELECT COUNT(*) FROM sessions")
-            out["usage"] = one("SELECT COUNT(*) FROM usage")
+            row = conn.execute(
+                "SELECT"
+                " (SELECT COUNT(*) FROM businesses) AS businesses,"
+                " (SELECT COUNT(*) FROM businesses WHERE email <> '') AS with_email,"
+                " (SELECT COUNT(*) FROM businesses WHERE website <> '') AS with_website,"
+                " (SELECT COUNT(*) FROM contacts) AS contacts,"
+                " (SELECT COUNT(*) FROM contacts WHERE verified = 1) AS verified_contacts,"
+                " (SELECT COUNT(*) FROM emails) AS emails,"
+                " (SELECT COUNT(*) FROM emails WHERE status = 'draft') AS drafts,"
+                " (SELECT COUNT(*) FROM emails WHERE status = 'sent') AS sent,"
+                " (SELECT COUNT(*) FROM emails WHERE status = 'failed') AS failed,"
+                " (SELECT COUNT(*) FROM sessions) AS sessions,"
+                " (SELECT COUNT(*) FROM usage) AS usage").fetchone()
+            out.update({k: (row[k] or 0) for k in out})
     except Exception:
         pass
     return out

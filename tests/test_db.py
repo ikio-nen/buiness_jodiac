@@ -68,15 +68,11 @@ def _():
         bcols = {r[1] for r in conn.execute("PRAGMA table_info(businesses)")}
         ecols = {r[1] for r in conn.execute("PRAGMA table_info(emails)")}
         idx = {r[1] for r in conn.execute("PRAGMA index_list(businesses)")}
-        view = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='view'"
-            " AND name='v_directory'").fetchone()
     assert {"name_norm", "domain", "goal", "times_seen",
             "first_seen", "last_seen"} <= bcols
     assert {"business_name", "sent_at", "error", "contact_id"} <= ecols
     assert {"idx_businesses_norm", "idx_businesses_domain",
             "idx_businesses_email"} <= idx
-    assert view is not None
 
 
 @check("businesses: upsert dedups on (session_id, ext_id)")
@@ -153,6 +149,13 @@ def _():
     store.upsert_contact(0, email="principal@vivekanandainstitution.com")
     store.link_contact_domains()
     assert len(store.contacts_for(bid)) == 2
+    # Phone-only contacts belong to their own business, not one shared row.
+    b2 = store.upsert_business("", {"name": "Phone Only Two"})
+    b3 = store.upsert_business("", {"name": "Phone Only Three"})
+    store.upsert_contact(b2, phone="5550002222")
+    store.upsert_contact(b3, phone="5550003333")
+    assert [c["phone"] for c in store.contacts_for(b2)] == ["5550002222"]
+    assert [c["phone"] for c in store.contacts_for(b3)] == ["5550003333"]
     assert store.stats()["verified_contacts"] == 1
 
 
@@ -179,12 +182,16 @@ def _():
 @check("backfill: JSON stores import idempotently")
 def _():
     root = Path(_TMP)
-    for sub in ("brain/businesses", "emails"):
+    for sub in ("brain/businesses", "emails", "sessions/s1"):
         (root / sub).mkdir(parents=True, exist_ok=True)
     (root / "brain/businesses/a.json").write_text(
         '{"name": "Aakash Institute", "category": "training",'
         ' "fit": "plausible", "fit_score": 60, "why_fit": "w",'
         ' "goal": "CAD", "times_seen": 6}', encoding="utf-8")
+    (root / "sessions/s1/search_results.json").write_text(
+        '{"businesses": [{"name": "Aakash Institute",'
+        ' "website": "https://aakash.in", "address": "Kandivali West, Mumbai"}]}',
+        encoding="utf-8")
     (root / "contact_cache.json").write_text(
         '{"abc": {"email": "hi@aakash.in", "phone": "", "whatsapp": "",'
         ' "sources": {"email": "www.aakash.in (homepage)", "email_verified": true},'
@@ -204,14 +211,19 @@ def _():
     import agents.db_backfill as bf  # loaded by _load from the same root
     first = bf.run()
     # 1 business from brain, 1 contact from the cache; the ledger adds the
-    # second business and its email, so the DB ends up with 2 of each.
+    # second business and its email, not another contact.
     assert first["businesses"] == 1 and first["contacts"] == 1
+    assert first["search_fields"] == 1
+    aakash = store.search_businesses("Aakash")[0]
+    assert aakash["website"] == "https://aakash.in"
+    assert aakash["location"] == "Kandivali West, Mumbai"
     assert first["sent"] == 2 and first["bounced"] == 1
-    assert first["db"]["businesses"] == 2 and first["db"]["contacts"] == 2
+    assert first["db"]["businesses"] == 2 and first["db"]["contacts"] == 1
     # One delivery stands, the bounced one is now 'failed'.
     assert first["db"]["sent"] == 1 and first["db"]["failed"] == 1
     second = bf.run()  # a replay adds nothing
-    assert second["sent"] == 0 and second["db"] == first["db"]
+    assert second["sent"] == 0 and second["search_fields"] == 0
+    assert second["db"] == first["db"]
     assert store.stats()["businesses"] == 2
 
 
@@ -228,6 +240,17 @@ def _():
     sent = store.list_emails("s1", kind="sent")
     assert len(sent) == 1 and sent[0]["provider"] == "resend"
     assert sent[0]["sent_at"] != ""
+    # Saving the send directly reuses the draft row instead of duplicating it.
+    did = store.save_email("s2", "b@x.com", "Same", "body")
+    sid = store.save_email("s2", "b@x.com", "Same", "body",
+                           kind="sent", status="sent")
+    assert did == sid
+    assert len(store.list_emails("s2")) == 1
+    # A name-only save resolves the business row written by the brain mirror.
+    named = store.upsert_business("s3", {"name": "Named Co"})
+    nid = store.save_email("s3", "c@x.com", "Hi", "body",
+                           business_name="Named Co")
+    assert store.emails_for(named)[0]["id"] == nid
 
 
 @check("sessions: register, get, upsert on conflict")

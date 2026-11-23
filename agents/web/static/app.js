@@ -19,7 +19,7 @@ import { initDictation } from './js/voice.js?v=80';
 import { initMusicCorner } from './js/music.js?v=80';
 import { renderChecklist, renderInterview, removeChecklistCard } from './js/campaign.js?v=80';
 import { initVault } from './js/vault.js?v=80';
-import { hBars, donut, funnel, statTiles, legend, fmt } from './js/charts.js?v=84';
+import { hBars, donut, funnel, statTiles, legend, fmt } from './js/charts.js?v=85';
 
 // ── Auth: the launch cookie, not a token in the page ──────────────
 // The server trades the launch URL for an HttpOnly SameSite=Strict cookie.
@@ -420,19 +420,7 @@ function directoryCharts(dir, width = chartWidth()) {
     html += `<div class="chart-note">${fmt(stats.drafts)} drafts · ${fmt(stats.failed)} failed</div></div></div>`;
   }
   if ((b.categories || []).length) {
-    // The database keys categories as slugs, and both "educational_institution"
-    // and "educational institution" can exist. Show one human label per
-    // category, top six by count, instead of a long tail of identical rows.
-    const cats = new Map();
-    b.categories.forEach(r => {
-      const label = String(r.label || '').replace(/_/g, ' ').trim();
-      if (label) cats.set(label, (cats.get(label) || 0) + (Number(r.value) || 0));
-    });
-    const rows = [...cats].sort((x, y) => y[1] - x[1]).slice(0, 6)
-      .map(([label, value]) => ({ label, value }));
-    if (rows.length) {
-      html += hBars(rows, { title: 'Top categories', labelWidth: 124, width });
-    }
+    html += hBars(b.categories, { title: 'Top categories', labelWidth: 124, width });
   }
   return html;
 }

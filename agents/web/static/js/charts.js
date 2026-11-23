@@ -6,7 +6,6 @@
    readable by assistive tech and when the page is printed.
    ═══════════════════════════════════════════════════════════════ */
 
-const NS = 'http://www.w3.org/2000/svg';
 const nf = new Intl.NumberFormat();
 export const fmt = (n) => nf.format(Math.round(Number(n) || 0));
 
@@ -24,7 +23,7 @@ function fitLabel(text, px, size = 12) {
   return s.length > max ? s.slice(0, max - 1) + '…' : s;
 }
 
-export const TONE = {
+const TONE = {
   accent: 'var(--accent)',
   ok: 'var(--ok)',
   warn: 'var(--warn)',
@@ -41,9 +40,9 @@ export function hBars(rows, opts = {}) {
   const width = opts.width || 320;
   const labelW = opts.labelWidth || 120;
   const valueW = 44;
-  const rowH = opts.rowHeight || 26;
+  const rowH = 26;
   const gap = 6;
-  const max = Math.max(opts.max || 0, ...data.map((r) => Number(r.value) || 0), 1);
+  const max = Math.max(...data.map((r) => Number(r.value) || 0), 1);
   const barMax = width - labelW - valueW - 16;
   const height = data.length * (rowH + gap);
   const bars = data.map((r, i) => {
@@ -68,7 +67,7 @@ export function hBars(rows, opts = {}) {
   return svgWrap({
     width, height,
     title: opts.title || 'Bar chart',
-    label: opts.label || data.map((r) => `${r.label}: ${fmt(r.value)}`).join(', '),
+    label: data.map((r) => `${r.label}: ${fmt(r.value)}`).join(', '),
     body: bars,
   });
 }
@@ -78,8 +77,8 @@ export function hBars(rows, opts = {}) {
    the parts make a whole (sent / skipped / failed). */
 export function donut(parts, opts = {}) {
   const data = (parts || []).filter((p) => p && (Number(p.value) || 0) > 0);
-  const size = opts.size || 148;
-  const thickness = opts.thickness || 20;
+  const size = 148;
+  const thickness = 20;
   const r = (size - thickness) / 2;
   const c = size / 2;
   const total = data.reduce((sum, p) => sum + (Number(p.value) || 0), 0);
@@ -87,7 +86,7 @@ export function donut(parts, opts = {}) {
     return svgWrap({
       width: size, height: size,
       title: opts.title || 'Donut chart',
-      label: opts.emptyLabel || 'No data yet',
+      label: 'No data yet',
       body: `<circle cx="${c}" cy="${c}" r="${r}" fill="none"
                 stroke="var(--line)" stroke-width="${thickness}"></circle>
              <text class="chart-center-value" x="${c}" y="${c + 4}"
@@ -111,14 +110,13 @@ export function donut(parts, opts = {}) {
     offset += dash;
     return arc;
   }).join('');
-  const centerValue = opts.centerValue !== undefined ? opts.centerValue : fmt(total);
   const centerLabel = opts.centerLabel || 'total';
   return svgWrap({
     width: size, height: size,
     title: opts.title || 'Donut chart',
     label: data.map((p) => `${p.label}: ${fmt(p.value)}`).join(', '),
     body: `${arcs}
-      <text class="chart-center-value" x="${c}" y="${c - 2}" text-anchor="middle">${esc(centerValue)}</text>
+      <text class="chart-center-value" x="${c}" y="${c - 2}" text-anchor="middle">${fmt(total)}</text>
       <text class="chart-center-label" x="${c}" y="${c + 15}" text-anchor="middle">${esc(centerLabel)}</text>`,
   });
 }
@@ -134,7 +132,7 @@ export function funnel(stages, opts = {}) {
   const gap = 8;
   const top = Math.max(...data.map((s) => Number(s.value) || 0), 1);
   const height = data.length * (rowH + gap);
-  const labelW = opts.labelWidth || 96;
+  const labelW = 96;
   const barMax = width - labelW - 52;
   const rows = data.map((s, i) => {
     const y = i * (rowH + gap);
@@ -186,9 +184,9 @@ export function legend(parts) {
 
 /* ── Shared wrapper ───────────────────────────────────────────── */
 function svgWrap({ width, height, title, label, body }) {
-  return `<figure class="chart" role="group" aria-label="${esc(label)}">
+  return `<figure class="chart">
     <svg viewBox="0 0 ${width} ${height}" width="${width}"
-         preserveAspectRatio="xMidYMid meet" role="img" aria-label="${esc(label)}">
+         role="img" aria-label="${esc(label)}">
       <title>${esc(title)}</title>
       ${body}
     </svg>

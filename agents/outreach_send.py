@@ -205,30 +205,25 @@ def send_emails_workflow(drafts: list[dict], sender_name: str) -> dict:
                 get_brain().learn_business(
                     biz.get("name", "?"),
                     category=biz.get("category", ""),
-                    facts={"phone": biz.get("phone", ""), "email": draft.get("to", "")},
+                    facts={
+                        "phone": biz.get("phone", ""),
+                        "email": draft.get("to", ""),
+                        "website": biz.get("website", ""),
+                        "location": biz.get("location", ""),
+                    },
                     interaction={"type": "emailed", "detail": draft.get("subject", "")[:80]},
                     source="send",
                 )
             except Exception:
                 pass
-            # Directory record of the send: one email row, linked to the
-            # business so the directory shows who was contacted and when.
+            # The brain mirror above already wrote the business row; this is
+            # only the email transition (a prior draft row is reused).
             try:
                 from agents import store
-                biz_id = store.upsert_business("", {
-                    "name": biz.get("name", ""),
-                    "category": biz.get("category", ""),
-                    "location": biz.get("location", ""),
-                    "website": biz.get("website", ""),
-                    "phone": biz.get("phone", ""),
-                    "email": draft.get("to", ""),
-                    "source": "send",
-                })
                 store.save_email("", draft.get("to", ""),
                                  draft.get("subject", ""),
                                  draft.get("body", ""),
-                                 business_id=biz_id, kind="sent",
-                                 status="sent", provider="smtp",
+                                 kind="sent", status="sent", provider="smtp",
                                  business_name=biz.get("name", ""),
                                  sent_at=str(record.get("timestamp", "")))
             except Exception:
