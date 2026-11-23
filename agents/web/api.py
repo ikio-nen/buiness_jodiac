@@ -183,22 +183,10 @@ async def api_status():
             "drafts_count": len(drafts),
             "ai_configured": ai_engine.is_available(),
             "ai_provider": _provider_status(),
-            # The directory is the durable record (agents/db.py); the session
-            # numbers above are just this conversation's slice of it.
-            "directory": _directory_summary(),
         }
     except Exception as e:
         err = _sanitize_error(e, "status check")
         return {"error": err["error"], "error_id": err["error_id"]}
-
-
-def _directory_summary() -> dict:
-    """Never let a DB problem break a read-only status call."""
-    try:
-        from agents import store
-        return store.stats()
-    except Exception:
-        return {}
 
 
 @router.get("/api/directory")
