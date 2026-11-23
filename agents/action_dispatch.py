@@ -14,6 +14,24 @@ from agents.config import get_sender_name, get_business_profile
 from agents.chatbot import ActionType
 
 
+def _saved_batch(data: dict) -> list:
+    """The batch the next action should work on.
+
+    Only the website goal targets businesses that have no site. For every
+    other goal (AutoCAD keys included) a website is irrelevant, so the full
+    kept list is the batch instead of the no-site subset.
+    """
+    targets = data.get("targets")
+    if targets:
+        return targets
+    if data.get("website_focus") is False:
+        return data.get("businesses", [])
+    goal = str(data.get("goal") or "")
+    if goal and goal != "website":
+        return data.get("businesses", [])
+    return data.get("no_website") or data.get("businesses", [])
+
+
 def dispatch(action_type: ActionType, params: dict, session) -> dict:
     """Execute an action and return a result dict.
 
@@ -131,18 +149,28 @@ def _handle_search(params: dict, session, sender: str) -> dict:
         sender, category=category, goal=goal,
     )
 
+    search_meta = report.get("search", {})
+    goal_key = search_meta.get("goal", "")
+    website_focus = bool(search_meta.get("icp", {}).get(
+        "website_focus", goal_key == "website"))
+    no_site = report.get("no_site", [])
+    total = search_meta.get("total", 0)
+    # Website goal: pitch the businesses with no site. Any other goal sells
+    # something unrelated to a website, so every kept business is a target.
+    targets = no_site if website_focus else report.get("businesses", [])
+
     # Save to session, including which goal this batch was judged against so
     # the draft leg pitches the same thing the search targeted.
     if session.active:
         session.save_data({
             "location": location, "radius": radius,
             "businesses": report.get("businesses", []),
-            "no_website": report.get("no_site", []),
-            "goal": report.get("search", {}).get("goal", ""),
+            "no_website": no_site,
+            "targets": targets,
+            "website_focus": website_focus,
+            "no_site_count": len(no_site),
+            "goal": goal_key,
         }, "search_results.json")
-
-    no_site = report.get("no_site", [])
-    total = report.get("search", {}).get("total", 0)
 
     if report.get("errors"):
         errors = "; ".join(e.get("error", "") for e in report["errors"])
@@ -151,13 +179,14 @@ def _handle_search(params: dict, session, sender: str) -> dict:
 
     # A filtered-out batch is not an empty area: say what was found first, or
     # "Found 0 businesses" contradicts the filter report printed right below it.
-    found = report.get("search", {}).get("found_raw", total)
+    found = search_meta.get("found_raw", total)
     if found > total:
-        message = (f"Found {found} places, {total} kept after filtering, "
-                   f"{len(no_site)} without website")
+        message = f"Found {found} places, {total} kept after filtering"
     else:
-        message = f"Found {total} businesses, {len(no_site)} without website"
-    filter_report = report.get("search", {}).get("filter_report", "")
+        message = f"Found {total} businesses"
+    if website_focus:
+        message += f", {len(no_site)} without website"
+    filter_report = search_meta.get("filter_report", "")
     if filter_report:
         message += f"\n  [filter] {filter_report}"
     phones_csv = report.get("phones_csv", "")
@@ -189,7 +218,7 @@ def _handle_search(params: dict, session, sender: str) -> dict:
     team_res = None
     team_note = ""
     try:
-        batch = no_site or report.get("search", {}).get("no_site", [])
+        batch = targets
         if batch:
             team_res = team_act(batch, session=session)
             if team_res.get("researched") or team_res.get("analyst_reply"):
@@ -211,13 +240,15 @@ def _handle_search(params: dict, session, sender: str) -> dict:
                    + (f"\n{notes_block}" if notes_block else ""),
         "data": {
             "total": total, "no_site": len(no_site),
-            "with_site": report.get("search", {}).get("with_site", 0),
+            "with_site": search_meta.get("with_site", 0),
+            "targets_count": len(targets),
+            "website_focus": website_focus,
             # Pre-filter count and the ICP's own explanation ride along so the
             # results card can say "23 of 508" instead of silently dropping 485.
             "found_raw": found,
             "filter_report": filter_report,
-            "icp": report.get("search", {}).get("icp", {}),
-            "businesses": no_site,
+            "icp": search_meta.get("icp", {}),
+            "businesses": targets,
             "phones_csv": phones_csv,
             "proactive_notes": notes,
             "team_result": team_res,
@@ -234,7 +265,7 @@ def _handle_draft(params: dict, session, sender: str) -> dict:
     )
 
     data = session.load_data("search_results.json") if session.active else {}
-    businesses = data.get("no_website", data.get("businesses", []))
+    businesses = _saved_batch(data)
 
     if not businesses:
         return {"success": False, "message": "No businesses to draft for. Search first.",
@@ -347,7 +378,7 @@ def _handle_research(params: dict, session) -> dict:
     from agents.workflows import research_workflow
 
     data = session.load_data("search_results.json") if session.active else {}
-    businesses = data.get("no_website", data.get("businesses", []))
+    businesses = _saved_batch(data)
 
     if not businesses:
         return {"success": False, "message": "No businesses to research. Search first.",
@@ -371,7 +402,7 @@ def _handle_sync(params: dict, session) -> dict:
     from agents.workflows import obsidian_sync_workflow
 
     data = session.load_data("search_results.json") if session.active else {}
-    businesses = data.get("no_website", data.get("businesses", []))
+    businesses = _saved_batch(data)
 
     if not businesses:
         return {"success": False, "message": "No businesses to sync. Search first.",
@@ -396,7 +427,7 @@ def _handle_scrape(params: dict, session) -> dict:
     from agents.workflows import scrape_businesses_workflow
 
     data = session.load_data("search_results.json") if session.active else {}
-    businesses = data.get("no_website", data.get("businesses", []))
+    businesses = _saved_batch(data)
 
     if not businesses:
         return {"success": False, "message": "No businesses to scrape. Search first.",
@@ -425,7 +456,7 @@ def _handle_enrich(params: dict, session) -> dict:
     hunter_key = get_hunter_key()
 
     data = session.load_data("search_results.json") if session.active else {}
-    businesses = data.get("no_website", data.get("businesses", []))
+    businesses = _saved_batch(data)
 
     if not businesses:
         return {"success": False, "message": "No businesses to enrich. Search first.",
@@ -487,7 +518,7 @@ def _handle_enrich(params: dict, session) -> dict:
 def _handle_team_act(session=None) -> dict:
     """Put the whole specialist team on the current prospect batch."""
     data = session.load_data("search_results.json") if (session and session.active) else {}
-    batch = data.get("no_website", data.get("businesses", []))
+    batch = _saved_batch(data)
     if not batch:
         from agents.agent_team import _latest_pending_batch
         batch = _latest_pending_batch()
@@ -656,6 +687,11 @@ def _handle_campaign(params: dict, session, sender: str) -> dict:
             "location": location, "radius": radius,
             "businesses": report.get("businesses", []),
             "no_website": curated_full,
+            "targets": curated_full,
+            "website_focus": bool(report.get("search", {}).get("icp", {}).get(
+                "website_focus",
+                report.get("search", {}).get("goal", "") == "website")),
+            "no_site_count": len(report.get("no_site", [])),
             "goal": report.get("search", {}).get("goal", ""),
         }, "search_results.json")
     except Exception:
@@ -689,13 +725,19 @@ def _handle_status(session) -> dict:
     sent = session.load_data("sent_emails.json").get("sent", []) if session.active else []
 
     businesses = len(data.get("businesses", []))
-    no_site = len(data.get("no_website", []))
+    no_site = int(data.get("no_site_count", len(data.get("no_website", []))) or 0)
     draft_count = len(drafts)
     sent_count = len(sent)
     name = session.name or "None"
 
-    msg = (f"Session '{name}': {businesses} businesses found "
-           f"({no_site} without website), {draft_count} drafts, {sent_count} sent.")
+    site_focus = data.get("website_focus")
+    if site_focus is None:
+        site_focus = ((data.get("goal") == "website")
+                      if data.get("goal") else True)
+    site_clause = (f" ({no_site} without website)"
+                   if site_focus else "")
+    msg = (f"Session '{name}': {businesses} businesses found{site_clause}, "
+           f"{draft_count} drafts, {sent_count} sent.")
 
     return {
         "success": True,

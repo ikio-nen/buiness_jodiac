@@ -1095,7 +1095,13 @@ def _latest_pending_batch(limit: int = 5) -> list[dict]:
     for sdir in sorted(sessions_dir.iterdir(), key=lambda p: p.stat().st_mtime,
                        reverse=True)[:5]:
         data = _load_json_file(sdir / "search_results.json")
-        batch = data.get("no_website") or []
+        if data.get("targets"):
+            batch = data["targets"]
+        elif (data.get("website_focus") is False
+              or (data.get("goal") and data.get("goal") != "website")):
+            batch = data.get("businesses") or []
+        else:
+            batch = data.get("no_website") or []
         if batch:
             return batch[:limit]
     return []

@@ -4062,20 +4062,66 @@ body::after {
 }
 
 .map-wrap {
+  position: relative !important;
   height: 264px !important;
   border: 1px solid var(--line) !important;
   border-radius: 14px !important;
   background: var(--panel-raised) !important;
   overflow: hidden;
   box-shadow: var(--shadow-soft);
+  cursor: grab;
+  touch-action: none;
+}
+
+/* Tiles carry inline left/top from the Mercator projection; they must be
+   absolutely positioned or they flow as a plain image grid (the old bug:
+   two columns and a blank strip on the right). */
+.map-tiles,
+.map-pins {
+  position: absolute !important;
+  inset: 0 !important;
+}
+
+.map-tiles {
+  pointer-events: none;
 }
 
 .map-tile {
+  position: absolute !important;
+  width: 256px;
+  height: 256px;
+  user-select: none;
+  pointer-events: none;
   filter: grayscale(0.35) contrast(0.94) brightness(1.04) !important;
   opacity: 0.94;
 }
 
+.map-pins {
+  pointer-events: none;
+}
+
+.map-pin {
+  position: absolute !important;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+  transform: translate(-50%, -6px);
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 2;
+}
+
 .map-zoom {
+  position: absolute !important;
+  z-index: 3 !important;
   top: 10px !important;
   right: 10px !important;
   display: grid !important;
@@ -4134,12 +4180,24 @@ body::after {
 }
 
 .map-pin-dot {
+  display: block;
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
   background: var(--accent) !important;
   border: 2px solid #fff !important;
   box-shadow: 0 0 0 2px var(--accent), 0 4px 10px -2px rgba(31, 62, 232, 0.6) !important;
 }
 
 .map-pin-lab {
+  display: block;
+  max-width: 176px;
+  padding: 2px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
   background: var(--panel-raised) !important;
   border: 1px solid var(--line) !important;
   border-radius: 8px !important;
@@ -4150,6 +4208,8 @@ body::after {
 }
 
 .map-ring {
+  position: absolute !important;
+  pointer-events: none;
   border: 1px dashed rgba(31, 62, 232, 0.7) !important;
   background: rgba(31, 62, 232, 0.05) !important;
   border-radius: 50% !important;

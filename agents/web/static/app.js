@@ -12,14 +12,14 @@
 // tag: bump both together or a browser keeps serving an old module.
 import { esc, setActivity, clearActivityIfIdle, showQueuedChip, setWorkActive,
          settleActivity, wrapAgentEvent } from './js/util.js?v=80';
-import { vtAppend, vtSwap } from './js/transitions.js?v=81';
+import { vtAppend, vtSwap } from './js/transitions.js?v=84';
 import { initQueue, renderQueue } from './js/queue.js?v=80';
 import { initAttachments, takeAttachment } from './js/attachments.js?v=80';
 import { initDictation } from './js/voice.js?v=80';
 import { initMusicCorner } from './js/music.js?v=80';
 import { renderChecklist, renderInterview, removeChecklistCard } from './js/campaign.js?v=80';
 import { initVault } from './js/vault.js?v=80';
-import { hBars, donut, funnel, statTiles, legend, fmt } from './js/charts.js?v=85';
+import { hBars, donut, funnel, statTiles, legend, fmt } from './js/charts.js?v=86';
 
 // ── Auth: the launch cookie, not a token in the page ──────────────
 // The server trades the launch URL for an HttpOnly SameSite=Strict cookie.
@@ -258,6 +258,10 @@ function chartWidth() {
 }
 
 function renderSearchResults(data) {
+  const icp = data.icp || {};
+  const siteFocus = data.website_focus != null
+    ? !!data.website_focus
+    : (icp.website_focus != null ? !!icp.website_focus : icp.goal === 'website');
   if (!data.businesses || data.businesses.length === 0) {
     // An empty list has three very different causes, and calling all of them
     // "no businesses in that area" reads as a broken search:
@@ -270,7 +274,7 @@ function renderSearchResults(data) {
     // ICP actually judged, kept as a fallback for older frames.
     const judged = (data.icp && data.icp.total) || 0;
     const raw = Number(data.found_raw) || judged || 0;
-    if (kept > 0) {
+    if (kept > 0 && siteFocus) {
       const n = withSite || kept;
       addMessage('jarvis',
         `${n} match${n === 1 ? '' : 'es'} near there already ${n === 1 ? 'has' : 'have'} a website, ` +
@@ -286,7 +290,6 @@ function renderSearchResults(data) {
     }
     return;
   }
-  const icp = data.icp || {};
   let html = `<div class="data-card"><div class="data-card-title">SEARCH RESULTS</div>`;
 
   // The office's decision about this batch, as a funnel plus verdict bars:
@@ -294,18 +297,20 @@ function renderSearchResults(data) {
   if (icp.total) {
     const rawCount = Number(data.found_raw) || icp.total;
     html += `<div class="chart-head">${esc(icp.goal_label || 'ICP filter')}${icp.product ? ` · for ${esc(icp.product)}` : ''}</div>`;
-    html += statTiles([
+    const tiles = [
       { value: fmt(rawCount), label: 'found' },
       { value: fmt(icp.total), label: 'judged' },
       { value: fmt(data.total), label: 'kept' },
-      { value: fmt(data.no_site_count), label: 'no site' },
-    ]);
-    html += funnel([
+    ];
+    if (siteFocus) tiles.push({ value: fmt(data.no_site_count), label: 'no site' });
+    html += statTiles(tiles);
+    const stages = [
       { label: 'found', value: rawCount },
       { label: 'judged', value: icp.total },
       { label: 'kept', value: data.total, tone: 'ok' },
-      { label: 'no site', value: data.no_site_count, tone: 'warn' },
-    ], { title: 'Search funnel', width: chartWidth() });
+    ];
+    if (siteFocus) stages.push({ label: 'no site', value: data.no_site_count, tone: 'warn' });
+    html += funnel(stages, { title: 'Search funnel', width: chartWidth() });
     html += hBars([
       { label: 'direct fits', value: icp.fits || 0, tone: 'ok' },
       { label: 'plausible', value: icp.plausible || 0, tone: 'warn' },
@@ -313,15 +318,17 @@ function renderSearchResults(data) {
     ], { title: 'ICP verdicts', width: chartWidth() });
   }
 
-  html += `<table class="data-table"><tr><th>#</th><th>Name</th><th>Fit</th><th>Type</th><th>Site</th></tr>`;
+  html += `<table class="data-table"><tr><th>#</th><th>Name</th><th>Fit</th><th>Type</th>${siteFocus ? '<th>Site</th>' : ''}</tr>`;
   data.businesses.forEach((b, i) => {
     const fit = b.fit || 'plausible';
     const score = b.fit_score ? `<span class="fit-score">${b.fit_score}</span>` : '';
     const badge = `<span class="fit-badge fit-${esc(fit)}">${fit === 'fits' ? 'FIT' : esc(fit).toUpperCase()}</span>${score}`;
     const type = b.institution_type ? esc(b.institution_type)
                                     : '<span class="fit-unknown">not classified</span>';
-    const webTag = b.has_website ? '<span class="tag tag-green">YES</span>' : '<span class="tag tag-red">NO</span>';
-    html += `<tr><td>${i + 1}</td><td>${esc(b.name)}</td><td>${badge}</td><td class="fit-type">${type}</td><td>${webTag}</td></tr>`;
+    const webCell = siteFocus
+      ? `<td>${b.has_website ? '<span class="tag tag-green">YES</span>' : '<span class="tag tag-red">NO</span>'}</td>`
+      : '';
+    html += `<tr><td>${i + 1}</td><td>${esc(b.name)}</td><td>${badge}</td><td class="fit-type">${type}</td>${webCell}</tr>`;
   });
   // Say how much of the scene survived the ICP: "Found 23 total" on a search
   // that scraped 508 places hides the filter instead of reporting it.
@@ -329,15 +336,20 @@ function renderSearchResults(data) {
   const head = raw > data.total
     ? `${data.total} of ${raw} places survived the ICP filter`
     : `Found ${data.total} total`;
-  html += `</table><div style="margin-top:8px;font-size:14px;color:var(--ink-soft);">${head}: `;
-  html += `<span class="tag tag-red">${data.no_site_count} without site</span> `;
-  html += `<span class="tag tag-green">${data.with_site_count} with site</span></div>`;
+  html += `</table><div style="margin-top:8px;font-size:14px;color:var(--ink-soft);">${head}`;
+  if (siteFocus) {
+    html += `: <span class="tag tag-red">${data.no_site_count} without site</span> `;
+    html += `<span class="tag tag-green">${data.with_site_count} with site</span>`;
+  }
+  html += `</div>`;
   if (data.source === 'gmaps') {
     html += `<div style="margin-top:6px;font-size:14px;color:var(--amber-warn);">↳ sourced from Google Maps (Overpass had no data here)</div>`;
   }
   // The card is where the user decides this batch is worth pitching, so the
   // next step of the loop starts here instead of asking them to retype it.
-  const n = Number(data.no_site_count) || data.businesses.length;
+  const n = siteFocus
+    ? (Number(data.no_site_count) || data.businesses.length)
+    : (Number(data.targets_count) || data.businesses.length);
   html += `<div style="margin-top:10px;"><button type="button" class="btn btn-primary" data-card-act="draft">✏️ draft emails for ${n === 1 ? 'this business' : 'these ' + n}</button></div>`;
   html += `</div>`;
   const card = appendCard(html);
@@ -1733,6 +1745,8 @@ statusBtn.addEventListener('click', async () => {
       if (aiProv.active) {
         aiLabel = `${esc(aiProv.provider || 'custom')} (${esc(aiProv.model || 'active')})`;
       }
+      const siteRow = data.website_focus === false ? '' :
+        `<div class="status-row"><span class="status-label">No Website</span><span class="status-value">${data.businesses_no_site || 0}</span></div>`;
       statusContent.innerHTML = `
         <div class="status-row"><span class="status-label">Session</span><span class="status-value">${esc(data.session_id || 'None')}</span></div>
         <div class="status-row"><span class="status-label">Name</span><span class="status-value">${esc(data.session_name || 'None')}</span></div>
@@ -1741,7 +1755,7 @@ statusBtn.addEventListener('click', async () => {
         <div class="status-row"><span class="status-label">Tone</span><span class="status-value">${esc(data.profile?.email_tone || 'professional')}</span></div>
         <div class="status-row"><span class="status-label">AI Engine</span><span class="status-value">${aiLabel}</span></div>
         <div class="status-row"><span class="status-label">Businesses</span><span class="status-value">${data.businesses_found || 0}</span></div>
-        <div class="status-row"><span class="status-label">No Website</span><span class="status-value">${data.businesses_no_site || 0}</span></div>
+        ${siteRow}
         <div class="status-row"><span class="status-label">Drafts</span><span class="status-value">${data.drafts_count || 0}</span></div>
         <div class="status-charts" id="statusCharts"></div>
       `;

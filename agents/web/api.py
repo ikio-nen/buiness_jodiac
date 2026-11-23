@@ -174,12 +174,18 @@ async def api_status():
         profile = get_business_profile()
         data = s.load_data("search_results.json") if s.active else {}
         drafts = s.load_data("email_drafts.json").get("drafts", []) if s.active else []
+        website_focus = data.get("website_focus")
+        if website_focus is None:
+            website_focus = ((data.get("goal") == "website")
+                             if data.get("goal") else None)
         return {
             "session_id": s.id if s.active else None,
             "session_name": s.name if s.active else None,
             "profile": profile,
             "businesses_found": len(data.get("businesses", [])),
-            "businesses_no_site": len(data.get("no_website", [])),
+            "businesses_no_site": int(data.get("no_site_count",
+                                             len(data.get("no_website", []))) or 0),
+            "website_focus": website_focus,
             "drafts_count": len(drafts),
             "ai_configured": ai_engine.is_available(),
             "ai_provider": _provider_status(),

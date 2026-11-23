@@ -133,7 +133,10 @@ export function funnel(stages, opts = {}) {
   const top = Math.max(...data.map((s) => Number(s.value) || 0), 1);
   const height = data.length * (rowH + gap);
   const labelW = 96;
-  const barMax = width - labelW - 52;
+  // Room for a 4-digit count plus " 100%" at the row's right edge, without
+  // the label sitting on top of a full-width bar.
+  const valueW = 64;
+  const barMax = width - labelW - valueW;
   const rows = data.map((s, i) => {
     const y = i * (rowH + gap);
     const v = Number(s.value) || 0;

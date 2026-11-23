@@ -582,7 +582,18 @@ function wireMap() {
     });
   }
 
-  window.addEventListener('resize', () => { renderTiles(); renderPins(); });
+  // The panel is hidden at boot and its width settles when it opens (and when
+  // the side body gains a scrollbar). Re-render whenever the map's box changes
+  // so the tile layer always covers the frame instead of leaving a strip.
+  if (typeof ResizeObserver === 'function') {
+    let frame = 0;
+    new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => { renderTiles(); renderPins(); });
+    }).observe(mapWrap);
+  } else {
+    window.addEventListener('resize', () => { renderTiles(); renderPins(); });
+  }
 }
 
 /* ── Runner ────────────────────────────────────────────────────── */

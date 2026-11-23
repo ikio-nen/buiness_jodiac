@@ -104,6 +104,8 @@ def shape_result(at: str, data: dict):
             "found_raw": _count(data.get("found_raw"), total),
             "no_site_count": _count(data.get("no_site")),
             "with_site_count": _count(data.get("with_site")),
+            "targets_count": _count(data.get("targets_count"), len(businesses)),
+            "website_focus": data.get("website_focus"),
             "filter_report": data.get("filter_report", "") or "",
             "icp": data.get("icp") or {},
             "source": data.get("source", "osm"),

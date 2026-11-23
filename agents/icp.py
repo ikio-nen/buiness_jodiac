@@ -698,6 +698,7 @@ def rank(businesses: list[dict], goal: dict | None = None,
     summary = {
         "goal": goal["key"],
         "goal_label": goal["label"],
+        "website_focus": goal["key"] == "website",
         "total": len(businesses),
         "fits": fits,
         "plausible": plausible,
