@@ -2,10 +2,11 @@
 
 Sources of truth that predate the database:
 
-    brain/businesses/*.json   -> businesses (one row per business, ever)
-    contact_cache.json        -> contacts  (emails/phones the finder verified)
-    emails/sent_ledger.jsonl  -> emails    (status 'sent')
-    emails/bounces.jsonl      -> emails    (status 'failed', reason kept)
+    brain/businesses/*.json        -> businesses (one row per business, ever)
+    contact_cache.json             -> contacts  (emails/phones the finder verified)
+    sessions/*/email_drafts.json   -> emails    (status 'draft')
+    emails/sent_ledger.jsonl       -> emails    (status 'sent')
+    emails/bounces.jsonl           -> emails    (status 'failed', reason kept)
 
 Usage:
     python -m agents.db_backfill          # import and print what changed
@@ -22,6 +23,7 @@ from agents import db, store
 from agents.config import OUTPUT_DIR
 
 BRAIN_BIZ = Path(OUTPUT_DIR) / "brain" / "businesses"
+SESSIONS = Path(OUTPUT_DIR) / "sessions"
 CONTACT_CACHE = Path(OUTPUT_DIR) / "contact_cache.json"
 SENT_LEDGER = Path(OUTPUT_DIR) / "emails" / "sent_ledger.jsonl"
 BOUNCES = Path(OUTPUT_DIR) / "emails" / "bounces.jsonl"
@@ -161,6 +163,49 @@ def backfill_sent() -> int:
     return added
 
 
+def backfill_drafts() -> int:
+    """sessions/*/email_drafts.json -> emails (status 'draft').
+
+    Drafts written before the capture hook existed live only in session JSON;
+    importing them keeps the directory's draft count honest. A (session, to,
+    subject) that already has a row is skipped, so re-running is safe.
+    """
+    added = 0
+    for path in sorted(SESSIONS.glob("*/email_drafts.json")):
+        session_id = path.parent.name
+        for rec in _read_json(path).get("drafts", []):
+            if not isinstance(rec, dict):
+                continue
+            to_email = str(rec.get("to", "") or "").strip().lower()
+            subject = str(rec.get("subject", "") or "").strip()
+            if not (to_email and subject):
+                continue
+            biz = rec.get("business") if isinstance(rec.get("business"), dict) else {}
+            name = str(biz.get("name", "") or "")
+            try:
+                with db.connect() as conn:
+                    exists = conn.execute(
+                        "SELECT 1 FROM emails WHERE session_id = ? AND to_email = ?"
+                        " AND subject = ? LIMIT 1", (session_id, to_email, subject),
+                    ).fetchone()
+                    if exists:
+                        continue
+                    row = conn.execute(
+                        "SELECT id FROM businesses WHERE name_norm = ? LIMIT 1",
+                        (store.norm_name(name),),
+                    ).fetchone() if name else None
+            except Exception:
+                continue
+            if store.save_email(
+                session_id=session_id, to_email=to_email, subject=subject,
+                body=str(rec.get("body", "") or ""),
+                business_id=row["id"] if row else 0,
+                kind="draft", status="draft", business_name=name,
+            ):
+                added += 1
+    return added
+
+
 def backfill_bounces() -> int:
     """bounces.jsonl -> fail the matching sent email, reason kept."""
     marked = 0
@@ -181,6 +226,7 @@ def run() -> dict:
     touched = {
         "businesses": backfill_businesses(),
         "contacts": backfill_contacts(),
+        "drafts": backfill_drafts(),
         "sent": backfill_sent(),
         "bounced": backfill_bounces(),
     }

@@ -19,7 +19,7 @@ import { initDictation } from './js/voice.js?v=80';
 import { initMusicCorner } from './js/music.js?v=80';
 import { renderChecklist, renderInterview, removeChecklistCard } from './js/campaign.js?v=80';
 import { initVault } from './js/vault.js?v=80';
-import { hBars, donut, funnel, statTiles, legend, fmt } from './js/charts.js?v=83';
+import { hBars, donut, funnel, statTiles, legend, fmt } from './js/charts.js?v=84';
 
 // ── Auth: the launch cookie, not a token in the page ──────────────
 // The server trades the launch URL for an HttpOnly SameSite=Strict cookie.
@@ -1765,7 +1765,8 @@ statusBtn.addEventListener('click', async () => {
         if (slot && !dir.error) {
           // The panel is ~320px wide, not the chat column: measure the panel
           // so its charts keep 12px labels instead of scaling a wide SVG down.
-          const panelWidth = Math.max(260, Math.min(560, (statusContent.clientWidth || 296) - 24));
+          const panelWidth = Math.max(
+            260, Math.min(560, (statusContent.clientWidth || 296) - 38));
           slot.innerHTML = directoryCharts(dir, panelWidth);
         }
       } catch (e) { /* the session rows above still stand */ }

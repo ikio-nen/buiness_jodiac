@@ -1177,49 +1177,6 @@ html[data-phase="night"]     #clockIcon { color: #8fa8d8; }
 .tag-red    { background: #f0d3ce; color: var(--red-bad); }
 .tag-yellow { background: #f3e4b8; color: #8a6d1f; }
 
-/* ICP fit verdicts on the results card */
-.icp-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: 2px 0 7px;
-  padding-bottom: 7px;
-}
-.icp-stat {
-  font-family: var(--pixel-font); font-size: 6px; padding: 3px 5px;
-  border-radius: 3px; border: 1px solid var(--line-warm);
-  background: var(--paper-deep); color: var(--ink-soft);
-}
-/* Which goal this batch was judged against - it changes between searches. */
-.icp-goal {
-  font-family: var(--pixel-font); font-size: 6px; padding: 3px 6px;
-  border-radius: 3px; border: 1px solid var(--wood-deep);
-  background: var(--accent-soft); color: var(--wood-deep);
-  border-color: var(--accent) !important;
-  background: var(--accent-soft) !important;
-  color: var(--accent-deep) !important;}
-.icp-stat b { font-size: 8px; margin-right: 2px;
-  font-size: 8.5px !important;}
-.icp-fits     { background: #dcecc9; border-color: var(--green-ok); color: var(--green-ok); }
-.icp-fits b   { color: var(--green-ok); }
-.icp-plausible     { background: #f6e7c1; border-color: var(--amber-warn); color: #8a6d1f; }
-.icp-plausible b   { color: #8a6d1f; }
-.icp-drop     { background: #f0d9d5; border-color: var(--red-bad); color: var(--red-bad); }
-.icp-drop b   { color: var(--red-bad); }
-.icp-for { margin-left: auto; font-size: 13px; color: var(--ink-soft); font-style: italic; }
-.icp-types { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 7px; }
-.icp-type {
-  font-size: 13px; color: var(--ink-soft); background: var(--paper-deep);
-  border: 1px solid var(--line); border-radius: 10px; padding: 1px 7px;
-  background: transparent !important;
-  border: 1px solid var(--line) !important;
-  border-radius: 999px !important;
-  color: var(--ink-soft) !important;
-  font-size: 10px !important;
-  padding: 2px 8px !important;}
-.icp-type b { color: var(--ink);
-  color: var(--ink) !important;}
 .fit-badge {
   font-family: var(--pixel-font); font-size: 6px; padding: 2px 4px;
   border-radius: 3px; border: 1px solid var(--ink);
@@ -2714,9 +2671,6 @@ html[data-phase="night"]     { --sun-strength: .15; --dust-strength: .3; }
   vertical-align: top;}
 .data-table tr:nth-child(even) td { background: rgba(44,39,31,.035);
   background: transparent !important;}
-.icp-bar { border-bottom: 1px solid var(--ink);
-  border-bottom: 1px solid var(--line) !important;}
-
 /* ── 6. Labels, not pills ────────────────────────────────────────
    999px radius on every small control is the giveaway. Square them and let
    the ink border do the work; chips get a heavier bottom edge so they read
@@ -2725,7 +2679,6 @@ html[data-phase="night"]     { --sun-strength: .15; --dust-strength: .3; }
 .chip,
 .station-btn,
 .clock-chip,
-.icp-type,
 .conn,
 .icon-btn,
 .goal-chip,
@@ -3280,6 +3233,7 @@ html[data-phase="night"]     { --sun-strength: .15; --dust-strength: .3; }
 /* ── 7. Email review: the whole pane, one tall body ─────────── */
 .cmd.is-reviewing .metric-row,
 .cmd.is-reviewing .quick-chips,
+.cmd.is-reviewing .composer,
 .cmd.is-reviewing #queuePanel { display: none !important; }
 .cmd.is-reviewing #messages {
   padding: 6px 14px 12px;
@@ -3301,7 +3255,9 @@ html[data-phase="night"]     { --sun-strength: .15; --dust-strength: .3; }
   flex-direction: column;
   padding: 14px 16px 12px;
   border-radius: 10px;
-  overflow: hidden;
+  /* Review owns the pane; if a short window cannot hold the whole card,
+     scroll the card rather than collapsing the body to a sliver. */
+  overflow-y: auto;
 }
 #reviewCard .review-biz { flex: none; }
 #reviewCard .review-field { flex: none; margin-top: 8px; }
@@ -3309,22 +3265,23 @@ html[data-phase="night"]     { --sun-strength: .15; --dust-strength: .3; }
 #reviewCard .review-field-subject input { width: 100%; }
 #reviewCard .review-field-body {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 120px;
   display: flex;
   flex-direction: column;
 }
 #reviewCard .review-field-body textarea {
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 120px;
   height: auto;
   resize: none;
 }
 #reviewCard .review-actions {
-  position: static;
+  position: sticky;
+  bottom: 0;
   flex: none;
   margin-top: 10px;
   padding: 10px 0 0;
-  background: transparent;
+  background: var(--panel-raised);
 }
 #reviewCard .review-btn { border-radius: 999px; padding: 6px 16px; }
 

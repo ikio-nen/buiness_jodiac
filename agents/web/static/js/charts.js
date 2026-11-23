@@ -29,8 +29,6 @@ export const TONE = {
   ok: 'var(--ok)',
   warn: 'var(--warn)',
   bad: 'var(--bad)',
-  moss: 'var(--moss)',
-  ink: 'var(--ink)',
   faint: 'var(--ink-faint)',
 };
 
