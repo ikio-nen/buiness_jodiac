@@ -46,7 +46,9 @@ def connect():
 
 
 # ── Migrations ───────────────────────────────────────────────────────
-# Each entry: (version, sql). Applied in order, once each.
+# Each entry: (version, sql-or-callable). Applied in order, once each.
+# Callables receive the open connection, for steps that need PRAGMA checks
+# (SQLite has no ALTER TABLE ... ADD COLUMN IF NOT EXISTS).
 
 _MIGRATIONS: list[tuple[int, str]] = [
     (1, """
@@ -113,7 +115,92 @@ _MIGRATIONS: list[tuple[int, str]] = [
     CREATE INDEX IF NOT EXISTS idx_usage_cap ON usage(capability);
     CREATE INDEX IF NOT EXISTS idx_usage_provider ON usage(provider);
     """),
+    (2, None),  # replaced below by _migration_2
 ]
+
+
+def _migration_2(conn: sqlite3.Connection) -> None:
+    """The directory: one row per business, every channel we know for it,
+    and the outreach that went with it.
+
+    v1 was a per-session log. This adds the normalised keys and the contacts
+    table a directory needs, so the same business found twice is one row and
+    an email is attached to the business instead of floating alone.
+    """
+    # Contacts first: emails.contact_id references it.
+    conn.executescript("""
+    CREATE TABLE IF NOT EXISTS contacts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        business_id INTEGER REFERENCES businesses(id) ON DELETE CASCADE,
+        email TEXT NOT NULL DEFAULT '',
+        phone TEXT NOT NULL DEFAULT '',
+        whatsapp TEXT NOT NULL DEFAULT '',
+        domain TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT '',
+        verified INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT '',
+        detail TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(email, domain)
+    );
+    CREATE INDEX IF NOT EXISTS idx_contacts_business ON contacts(business_id);
+    CREATE INDEX IF NOT EXISTS idx_contacts_email ON contacts(email);
+    CREATE INDEX IF NOT EXISTS idx_contacts_domain ON contacts(domain);
+    """)
+
+    def add(table: str, columns: list[tuple[str, str]]) -> None:
+        existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+        for name, ddl in columns:
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+
+    add("businesses", [
+        ("name_norm", "TEXT NOT NULL DEFAULT ''"),
+        ("domain", "TEXT NOT NULL DEFAULT ''"),
+        ("goal", "TEXT NOT NULL DEFAULT ''"),
+        ("times_seen", "INTEGER NOT NULL DEFAULT 1"),
+        ("first_seen", "TEXT NOT NULL DEFAULT ''"),
+        ("last_seen", "TEXT NOT NULL DEFAULT ''"),
+    ])
+    add("emails", [
+        ("contact_id", "INTEGER REFERENCES contacts(id) ON DELETE SET NULL"),
+        ("business_name", "TEXT NOT NULL DEFAULT ''"),
+        ("approved_at", "TEXT NOT NULL DEFAULT ''"),
+        ("error", "TEXT NOT NULL DEFAULT ''"),
+        ("message_id", "TEXT NOT NULL DEFAULT ''"),
+        ("updated_at", "TEXT NOT NULL DEFAULT ''"),
+    ])
+
+    conn.executescript("""
+    CREATE INDEX IF NOT EXISTS idx_businesses_norm ON businesses(name_norm);
+    CREATE INDEX IF NOT EXISTS idx_businesses_domain ON businesses(domain);
+    CREATE INDEX IF NOT EXISTS idx_businesses_email ON businesses(email);
+    CREATE INDEX IF NOT EXISTS idx_businesses_score ON businesses(fit_score);
+    CREATE INDEX IF NOT EXISTS idx_emails_to ON emails(to_email);
+    CREATE INDEX IF NOT EXISTS idx_emails_status ON emails(status);
+    CREATE INDEX IF NOT EXISTS idx_emails_business ON emails(business_id);
+    -- Backfill the normalised keys on rows that predate this migration.
+    UPDATE businesses SET name_norm = lower(trim(name)) WHERE name_norm = '';
+    UPDATE businesses SET first_seen = created_at WHERE first_seen = '';
+    UPDATE businesses SET last_seen = updated_at WHERE last_seen = '';
+
+    DROP VIEW IF EXISTS v_directory;
+    CREATE VIEW v_directory AS
+        SELECT b.id, b.name, b.name_norm, b.domain, b.category, b.location,
+               b.website, b.phone, b.email, b.fit_score, b.fit_verdict,
+               b.goal, b.times_seen, b.first_seen, b.last_seen,
+               (SELECT COUNT(*) FROM emails e
+                 WHERE e.business_id = b.id AND e.status = 'sent') AS sent_count,
+               (SELECT e.to_email FROM emails e
+                 WHERE e.business_id = b.id AND e.status = 'sent'
+                 ORDER BY e.id DESC LIMIT 1) AS last_sent_to
+          FROM businesses b;
+    """)
+
+
+_MIGRATIONS = [(v, (_migration_2 if s is None else s))
+               for v, s in _MIGRATIONS]
 
 
 def migrate() -> int:
@@ -124,10 +211,13 @@ def migrate() -> int:
             "version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)")
         applied = {r[0] for r in
                    conn.execute("SELECT version FROM schema_migrations")}
-        for version, sql in sorted(_MIGRATIONS):
+        for version, step in sorted(_MIGRATIONS, key=lambda item: item[0]):
             if version in applied:
                 continue
-            conn.executescript(sql)
+            if callable(step):
+                step(conn)
+            else:
+                conn.executescript(step)
             conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations (version, applied_at)"
                 " VALUES (?, ?)", (version, _now()))

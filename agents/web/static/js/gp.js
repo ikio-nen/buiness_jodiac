@@ -12,11 +12,20 @@ const $$ = (sel) => [...document.querySelectorAll(sel)];
    Hide when the socket reports online; the CSS backstop covers the case
    where no script runs, and the JS ceiling covers a socket that never
    connects. Three independent ways out, so the splash can never strand. */
+/* A locally-connected socket reports online in a few hundred ms, which used to
+   cut the start-up sequence off before a single line of it had played. The
+   terminal animation now owns the next BOOT_HOLD_MS; the CSS backstop still
+   covers the case where no script runs at all. */
+const BOOT_HOLD_MS = 2600;
+
 function finishBoot() {
   const boot = document.getElementById('boot');
-  if (!boot || boot.classList.contains('is-done')) return;
-  boot.classList.add('is-done');
-  window.setTimeout(() => boot.remove(), 520);
+  if (!boot || boot.classList.contains('is-done') || boot.dataset.finishing) return;
+  boot.dataset.finishing = '1';
+  window.setTimeout(() => {
+    boot.classList.add('is-done');
+    window.setTimeout(() => boot.remove(), 520);
+  }, BOOT_HOLD_MS);
 }
 
 function watchBoot() {

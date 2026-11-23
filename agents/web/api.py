@@ -12,6 +12,7 @@ import json
 import logging
 import re
 import secrets
+from html import escape as html_escape
 from pathlib import Path
 
 from fastapi import (APIRouter, File, HTTPException, Request, UploadFile)
@@ -135,6 +136,20 @@ async def index(request: Request):
     html = (STATIC_DIR / "index.html").read_text(encoding="utf-8")
     dry_badge = '<span class="dry-run-badge" id="dryRunBadge" title="DRY RUN active — email sending and paid APIs are mocked">DRY RUN</span>' if is_dry_run() else ''
     html = html.replace('<!-- DRY_RUN_BADGE -->', dry_badge)
+
+    # The map's tile source is configuration, not code: the template and its
+    # credit ride in as meta tags, so a keyed provider needs no JS edit.
+    from agents.config import map_tile_config
+    tiles = map_tile_config()
+    tile_url = html_escape(tiles["url"], quote=True)
+    tile_attrib = html_escape(tiles["attrib"], quote=True)
+    tile_attrib_url = html_escape(tiles["attrib_url"], quote=True)
+    map_meta = "\n".join((
+        f'<meta name="map-tile-url" content="{tile_url}">',
+        f'  <meta name="map-attrib" content="{tile_attrib}">',
+        f'  <meta name="map-attrib-url" content="{tile_attrib_url}">',
+    ))
+    html = html.replace('<!-- MAP_SOURCE -->', map_meta)
     return HTMLResponse(
         content=html,
         headers={"Cache-Control": "no-cache, must-revalidate"},
@@ -168,10 +183,37 @@ async def api_status():
             "drafts_count": len(drafts),
             "ai_configured": ai_engine.is_available(),
             "ai_provider": _provider_status(),
+            # The directory is the durable record (agents/db.py); the session
+            # numbers above are just this conversation's slice of it.
+            "directory": _directory_summary(),
         }
     except Exception as e:
         err = _sanitize_error(e, "status check")
         return {"error": err["error"], "error_id": err["error_id"]}
+
+
+def _directory_summary() -> dict:
+    """Never let a DB problem break a read-only status call."""
+    try:
+        from agents import store
+        return store.stats()
+    except Exception:
+        return {}
+
+
+@router.get("/api/directory")
+async def api_directory():
+    """Everything the dashboard charts need, in one read."""
+    try:
+        from agents import store
+        return {
+            "stats": store.stats(),
+            "breakdown": store.breakdown(),
+        }
+    except Exception as e:
+        err = _sanitize_error(e, "directory read")
+        return {"error": err["error"], "error_id": err["error_id"],
+                "stats": {}, "breakdown": {}}
 
 
 @router.get("/api/geocode")

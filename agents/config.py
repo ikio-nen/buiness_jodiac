@@ -2,6 +2,7 @@
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 try:
     from dotenv import load_dotenv
@@ -60,6 +61,49 @@ def load_config() -> dict:
 
 def save_config(cfg: dict):
     CONFIG_FILE.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+
+# ── Map tiles ──────────────────────────────────────────────────────────
+# The Locations map is a hand-rolled tile client, so its source is a template
+# rather than a library. OpenStreetMap's volunteer servers are the default and
+# all a light local map needs; MAP_TILE_URL moves it to a keyed provider with
+# no code change. {z}/{x}/{y} are required, {s} rotates subdomains, {r} is the
+# retina suffix some providers offer.
+DEFAULT_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+DEFAULT_TILE_ATTRIB = "© OpenStreetMap contributors"
+DEFAULT_TILE_ATTRIB_URL = "https://www.openstreetmap.org/copyright"
+
+
+def map_tile_origin(url: str) -> str:
+    """The CSP source expression that matches a tile template.
+
+    "" means same-origin (a relative template), which default-src 'self'
+    already allows. A host carrying {s} -- CARTO's does -- becomes a wildcard.
+    """
+    parts = urlsplit(url or "")
+    if not parts.scheme or not parts.hostname:
+        return ""
+    return f"{parts.scheme}://{parts.hostname.replace('{s}', '*')}"
+
+
+def map_tile_config() -> dict:
+    """Where the map's images come from, and what it has to credit.
+
+    A template missing {z}/{x}/{y} would draw nothing at all, so it falls back
+    to the default instead of blacking out the panel. The credit defaults to
+    OpenStreetMap's (the data is OSM-derived either way) and is meant to be
+    extended, not replaced, when a provider also wants its own line.
+    """
+    url = (os.environ.get("MAP_TILE_URL") or "").strip()
+    if not all(p in url for p in ("{z}", "{x}", "{y}")):
+        url = DEFAULT_TILE_URL
+    return {
+        "url": url,
+        "origin": map_tile_origin(url),
+        "attrib": (os.environ.get("MAP_TILE_ATTRIB") or "").strip() or DEFAULT_TILE_ATTRIB,
+        "attrib_url": ((os.environ.get("MAP_TILE_ATTRIB_URL") or "").strip()
+                       or DEFAULT_TILE_ATTRIB_URL),
+    }
 
 
 def get_secret_with_precedence(env_var: str, vault_key: str, config_key: str) -> str:

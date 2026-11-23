@@ -618,6 +618,26 @@ def draft_and_pdf_workflow(businesses: list[dict], sender_name: str,
                 )
             except Exception:
                 pass
+            # Record the draft against its business in the directory.
+            try:
+                from agents import store
+                biz_id = store.upsert_business("", {
+                    "name": biz.get("name", ""),
+                    "category": category,
+                    "location": biz.get("location", ""),
+                    "website": biz.get("website", ""),
+                    "phone": biz.get("phone", ""),
+                    "email": draft.get("to", ""),
+                    "source": "draft",
+                })
+                store.save_email("", draft.get("to", ""),
+                                 draft.get("subject", ""),
+                                 draft.get("body", ""),
+                                 business_id=biz_id, kind="draft",
+                                 status="draft",
+                                 business_name=biz.get("name", ""))
+            except Exception:
+                pass
             drafts.append(draft)
         else:
             errors.append({"name": biz["name"], "type": "email", "error": email_result.error})

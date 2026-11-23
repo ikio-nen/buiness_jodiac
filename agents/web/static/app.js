@@ -11,14 +11,15 @@
 // The ?v= on each import is the same version as the document's app.js
 // tag: bump both together or a browser keeps serving an old module.
 import { esc, setActivity, clearActivityIfIdle, showQueuedChip, setWorkActive,
-         settleActivity, wrapAgentEvent } from './js/util.js?v=79';
-import { vtAppend, vtSwap } from './js/transitions.js?v=79';
-import { initQueue, renderQueue } from './js/queue.js?v=79';
-import { initAttachments, takeAttachment } from './js/attachments.js?v=79';
-import { initDictation } from './js/voice.js?v=79';
-import { initMusicCorner } from './js/music.js?v=79';
-import { renderChecklist, renderInterview, removeChecklistCard } from './js/campaign.js?v=79';
-import { initVault } from './js/vault.js?v=79';
+         settleActivity, wrapAgentEvent } from './js/util.js?v=80';
+import { vtAppend, vtSwap } from './js/transitions.js?v=80';
+import { initQueue, renderQueue } from './js/queue.js?v=80';
+import { initAttachments, takeAttachment } from './js/attachments.js?v=80';
+import { initDictation } from './js/voice.js?v=80';
+import { initMusicCorner } from './js/music.js?v=80';
+import { renderChecklist, renderInterview, removeChecklistCard } from './js/campaign.js?v=80';
+import { initVault } from './js/vault.js?v=80';
+import { hBars, donut, funnel, statTiles, legend, fmt } from './js/charts.js?v=82';
 
 // ── Auth: the launch cookie, not a token in the page ──────────────
 // The server trades the launch URL for an HttpOnly SameSite=Strict cookie.
@@ -246,6 +247,14 @@ function makeActivatable(el) {
 
 // ── Data Renderers ───────────────────────────────────────────────
 
+// Charts are drawn at the width they will display at: a fixed viewBox
+// upscaled by CSS would magnify every label along with the bars.
+function chartWidth() {
+  const el = document.getElementById('messages');
+  const avail = (el ? el.clientWidth : 640) - 56;
+  return Math.max(300, Math.min(720, avail));
+}
+
 function renderSearchResults(data) {
   if (!data.businesses || data.businesses.length === 0) {
     // An empty list has three very different causes, and calling all of them
@@ -278,20 +287,28 @@ function renderSearchResults(data) {
   const icp = data.icp || {};
   let html = `<div class="data-card"><div class="data-card-title">SEARCH RESULTS</div>`;
 
-  // ICP verdict bar — what the office decided about this batch, shown before
-  // the list so the filtering is visible instead of silent.
+  // The office's decision about this batch, as a funnel plus verdict bars:
+  // how many places were found, judged, kept, and how the filter split them.
   if (icp.total) {
-    html += `<div class="icp-bar">`;
-    if (icp.goal_label) html += `<span class="icp-goal">${esc(icp.goal_label)}</span>`;
-    html += `<span class="icp-stat icp-fits"><b>${icp.fits || 0}</b> direct fits</span>`;
-    html += `<span class="icp-stat icp-plausible"><b>${icp.plausible || 0}</b> plausible</span>`;
-    html += `<span class="icp-stat icp-drop"><b>${icp.dropped || 0}</b> ruled out</span>`;
-    if (icp.product) html += `<span class="icp-for">for ${esc(icp.product)}</span>`;
-    html += `</div>`;
-    if (icp.by_type && icp.by_type.length) {
-      html += `<div class="icp-types">` + icp.by_type.map(t =>
-        `<span class="icp-type">${esc(t.label)} <b>${t.count}</b></span>`).join('') + `</div>`;
-    }
+    const rawCount = Number(data.found_raw) || icp.total;
+    html += `<div class="chart-head">${esc(icp.goal_label || 'ICP filter')}${icp.product ? ` · for ${esc(icp.product)}` : ''}</div>`;
+    html += statTiles([
+      { value: fmt(rawCount), label: 'found' },
+      { value: fmt(icp.total), label: 'judged' },
+      { value: fmt(data.total), label: 'kept' },
+      { value: fmt(data.no_site_count), label: 'no site' },
+    ]);
+    html += funnel([
+      { label: 'found', value: rawCount },
+      { label: 'judged', value: icp.total },
+      { label: 'kept', value: data.total, tone: 'ok' },
+      { label: 'no site', value: data.no_site_count, tone: 'warn' },
+    ], { title: 'Search funnel', width: chartWidth() });
+    html += hBars([
+      { label: 'direct fits', value: icp.fits || 0, tone: 'ok' },
+      { label: 'plausible', value: icp.plausible || 0, tone: 'warn' },
+      { label: 'ruled out', value: icp.dropped || 0, tone: 'bad' },
+    ], { title: 'ICP verdicts', width: chartWidth() });
   }
 
   html += `<table class="data-table"><tr><th>#</th><th>Name</th><th>Fit</th><th>Type</th><th>Site</th></tr>`;
@@ -330,7 +347,19 @@ function renderSearchResults(data) {
 }
 
 function renderDraftResults(data) {
+  const withEmail = (data.drafts || []).filter(d => d.to).length;
+  const missing = (data.drafts || []).length - withEmail;
   let html = `<div class="data-card"><div class="data-card-title">DRAFTED ${data.count} EMAILS</div>`;
+  html += statTiles([
+    { value: fmt(data.count), label: 'drafts' },
+    { value: fmt(withEmail), label: 'addressed' },
+    { value: fmt(missing), label: 'no email' },
+    { value: `${data.ai_used || 0}/${data.count}`, label: 'AI written' },
+  ]);
+  html += hBars([
+    { label: 'with address', value: withEmail, tone: 'ok' },
+    { label: 'missing address', value: missing, tone: 'warn' },
+  ], { title: 'Draft coverage', width: chartWidth() });
   html += `<table class="data-table"><tr><th>Business</th><th>Subject</th><th>Email</th></tr>`;
   data.drafts.forEach(d => {
     const emailTag = d.to ? `<span class="tag tag-green">${esc(d.to)}</span>` : '<span class="tag tag-yellow">No email</span>';
@@ -338,18 +367,89 @@ function renderDraftResults(data) {
       ? `<div style="font-size:13px;color:var(--amber-warn);">${esc(d.exec_name)}${d.exec_title ? ' — ' + esc(d.exec_title) : ''}</div>` : '';
     html += `<tr><td>${esc(d.business)}${exec}</td><td>${esc(d.subject)}</td><td>${emailTag}</td></tr>`;
   });
-  html += `</table>`;
-  if (data.ai_used > 0) html += `<div style="margin-top:8px;font-size:14px;color:var(--green-ok);">AI personalized: ${data.ai_used}/${data.count}</div>`;
-  html += `</div>`;
+  html += `</table></div>`;
   appendCard(html);
 }
 
 function renderSendResults(data) {
-  let html = `<div class="data-card"><div class="data-card-title">EMAILS SENT</div><div style="display:flex;gap:18px;margin-top:4px;">`;
-  html += `<div><span style="color:var(--green-ok);font-size:26px;">${data.sent}</span><div style="font-size:13px;color:var(--ink-soft);">Sent</div></div>`;
-  html += `<div><span style="color:var(--amber-warn);font-size:26px;">${data.skipped}</span><div style="font-size:13px;color:var(--ink-soft);">Skipped</div></div>`;
-  html += `<div><span style="color:var(--red-bad);font-size:26px;">${data.errors}</span><div style="font-size:13px;color:var(--ink-soft);">Errors</div></div>`;
-  html += `</div></div>`;
+  const parts = [
+    { label: 'sent', value: data.sent || 0, tone: 'ok' },
+    { label: 'skipped', value: data.skipped || 0, tone: 'warn' },
+    { label: 'errors', value: data.errors || 0, tone: 'bad' },
+  ];
+  let html = `<div class="data-card"><div class="data-card-title">EMAILS SENT</div>`;
+  html += `<div class="chart-split">`;
+  html += donut(parts, { centerLabel: 'this batch', title: 'Send outcomes' });
+  html += `<div class="chart-side">${statTiles([
+    { value: fmt(data.sent), label: 'sent' },
+    { value: fmt(data.skipped), label: 'skipped' },
+    { value: fmt(data.errors), label: 'errors' },
+  ])}${legend(parts)}</div></div></div>`;
+  appendCard(html);
+}
+
+/* The directory dashboard: the durable record, charted. Shared by the
+   status panel and the dashboard chip so the two can never disagree. */
+function directoryCharts(dir) {
+  const stats = (dir && dir.stats) || {};
+  const b = (dir && dir.breakdown) || {};
+  const fit = (b.fit || []).map(r => ({
+    label: r.label,
+    value: r.value,
+    tone: r.label === 'fits' ? 'ok' : r.label === 'plausible' ? 'warn'
+         : r.label === 'unjudged' ? 'faint' : 'bad',
+  }));
+  const status = (b.email_status || []).map(r => ({
+    label: r.label,
+    value: r.value,
+    tone: r.label === 'sent' ? 'ok' : r.label === 'failed' ? 'bad' : 'warn',
+  }));
+  let html = statTiles([
+    { value: fmt(stats.businesses), label: 'businesses' },
+    { value: fmt(stats.contacts), label: 'contacts' },
+    { value: fmt(stats.verified_contacts), label: 'verified' },
+    { value: fmt(stats.sent), label: 'emails sent' },
+  ]);
+  if (fit.length) html += hBars(fit, { title: 'Businesses by fit verdict', width: chartWidth() });
+  if (status.length) {
+    html += `<div class="chart-split">`;
+    html += donut(status, { centerLabel: 'emails', title: 'Email pipeline' });
+    html += `<div class="chart-side">${legend(status)}`;
+    html += `<div class="chart-note">${fmt(stats.drafts)} drafts · ${fmt(stats.failed)} failed</div></div></div>`;
+  }
+  if ((b.categories || []).length) {
+    html += hBars(b.categories.map(r => ({ label: r.label, value: r.value })),
+                  { title: 'Top categories', labelWidth: 132, width: chartWidth() });
+  }
+  return html;
+}
+
+async function renderDirectoryDashboard() {
+  let dir = {};
+  try {
+    const res = await fetch('/api/directory');
+    dir = await res.json();
+  } catch (e) {
+    addMessage('jarvis', 'Could not read the directory right now.', { error: true });
+    return;
+  }
+  if (dir.error) { addMessage('jarvis', dir.error, { error: true }); return; }
+  let html = `<div class="data-card"><div class="data-card-title">DIRECTORY DASHBOARD</div>`;
+  html += directoryCharts(dir);
+  const top = (dir.breakdown && dir.breakdown.top) || [];
+  if (top.length) {
+    html += `<div class="chart-head">best leads with a reachable email</div>`;
+    html += `<table class="data-table"><tr><th>Business</th><th>Fit</th><th>Email</th></tr>`;
+    top.forEach(r => {
+      const email = r.best_email
+        ? `<span class="tag tag-green">${esc(r.best_email)}</span>`
+        : '<span class="tag tag-yellow">no email</span>';
+      html += `<tr><td>${esc(r.name)}</td><td>${r.fit_score ?? '—'}</td>` +
+              `<td>${email}</td></tr>`;
+    });
+    html += `</table>`;
+  }
+  html += `</div>`;
   appendCard(html);
 }
 
@@ -1511,17 +1611,20 @@ document.querySelectorAll('.quick-chips .chip, #chipsMore .chip').forEach(btn =>
   btn.addEventListener('click', () => {
     const action = btn.dataset.action;
     if (!action) return;   // the "more" summary is a chip too, not an action
+    const more = document.getElementById('chipsMore');
+    if (more) more.open = false;
+    // The dashboard is rendered from the directory API, not round-tripped
+    // through the chat parser: the numbers already exist and the charts are
+    // a direct read, so the answer comes back instantly and stays visual.
+    if (action === 'dashboard') { renderDirectoryDashboard(); return; }
     const prompts = {
       search: 'find businesses in Bandel',
       draft: 'draft emails for the businesses',
       research: 'research these businesses',
       send: 'send all emails',
       status: 'show status',
-      dashboard: 'show dashboard',
     };
     const text = prompts[action] || action;
-    const more = document.getElementById('chipsMore');
-    if (more) more.open = false;
     userInput.value = text;
     sendMessage();
   });
@@ -1638,7 +1741,15 @@ statusBtn.addEventListener('click', async () => {
         <div class="status-row"><span class="status-label">Businesses</span><span class="status-value">${data.businesses_found || 0}</span></div>
         <div class="status-row"><span class="status-label">No Website</span><span class="status-value">${data.businesses_no_site || 0}</span></div>
         <div class="status-row"><span class="status-label">Drafts</span><span class="status-value">${data.drafts_count || 0}</span></div>
+        <div class="status-charts" id="statusCharts"></div>
       `;
+      // The durable directory, charted underneath the session rows.
+      try {
+        const dirRes = await fetch('/api/directory');
+        const dir = await dirRes.json();
+        const slot = document.getElementById('statusCharts');
+        if (slot && !dir.error) slot.innerHTML = directoryCharts(dir);
+      } catch (e) { /* the session rows above still stand */ }
     } catch (e) {
       statusContent.innerHTML = '<div style="color:var(--red-bad);">Failed to load status</div>';
     }

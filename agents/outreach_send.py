@@ -211,6 +211,28 @@ def send_emails_workflow(drafts: list[dict], sender_name: str) -> dict:
                 )
             except Exception:
                 pass
+            # Directory record of the send: one email row, linked to the
+            # business so the directory shows who was contacted and when.
+            try:
+                from agents import store
+                biz_id = store.upsert_business("", {
+                    "name": biz.get("name", ""),
+                    "category": biz.get("category", ""),
+                    "location": biz.get("location", ""),
+                    "website": biz.get("website", ""),
+                    "phone": biz.get("phone", ""),
+                    "email": draft.get("to", ""),
+                    "source": "send",
+                })
+                store.save_email("", draft.get("to", ""),
+                                 draft.get("subject", ""),
+                                 draft.get("body", ""),
+                                 business_id=biz_id, kind="sent",
+                                 status="sent", provider="smtp",
+                                 business_name=biz.get("name", ""),
+                                 sent_at=str(record.get("timestamp", "")))
+            except Exception:
+                pass
         else:
             errors.append({"name": biz.get("name", "?") if biz else "?",
                            "error": result.get("error", "Unknown")})
@@ -222,6 +244,17 @@ def send_emails_workflow(drafts: list[dict], sender_name: str) -> dict:
                 draft.get("body", ""),
                 success=False,
             )
+            # Keep the failure in the directory too — a bounce is data.
+            try:
+                from agents import store
+                store.save_email("", draft.get("to", ""),
+                                 draft.get("subject", ""),
+                                 draft.get("body", ""),
+                                 kind="failed", status="failed",
+                                 business_name=biz.get("name", "") if biz else "",
+                                 error=str(result.get("error", "")))
+            except Exception:
+                pass
 
     return {
         "sent": sent,

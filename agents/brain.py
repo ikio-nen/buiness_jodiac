@@ -90,6 +90,26 @@ class Brain:
             rec["interactions"] = rec["interactions"][-20:]
 
         self._write(self._biz_path(name), rec)
+        # Mirror into the SQL directory. Best-effort: the JSON file above is
+        # already the durable copy, and a DB problem must never block learning.
+        try:
+            from agents import store
+            store.upsert_business("", {
+                "name": name,
+                "category": rec.get("category", ""),
+                "location": rec.get("location", ""),
+                "website": rec.get("website", ""),
+                "phone": rec.get("phone", ""),
+                "email": rec.get("email", ""),
+                "goal": rec.get("goal", ""),
+                "fit_score": rec.get("fit_score"),
+                "fit_verdict": rec.get("fit", ""),
+                "fit_rationale": rec.get("why_fit", ""),
+                "times_seen": rec.get("times_seen", 1),
+                "source": source or "brain",
+            })
+        except Exception:
+            pass
         try:
             from agents.event_bus import emit
             emit("brain", action="learn", detail=name[:60])

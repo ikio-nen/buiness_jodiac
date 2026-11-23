@@ -20,6 +20,7 @@ the CLI both execute actions through agents.action_dispatch, which is what
 keeps their behavior identical.
 """
 import logging
+import mimetypes
 import re
 import sys
 from pathlib import Path
@@ -61,6 +62,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from agents.config import map_tile_config
 from agents.web import api, ws
 from agents.web.auth import (SESSION_COOKIE, get_launch_auth_token,
                              request_token, verify_auth_token)
@@ -103,14 +105,17 @@ INDEX_PATHS = ("/", "/index.html")
 
 def _harden(response, origin: str | None):
     """Security headers on every response, early returns included."""
+    # The location map's tile host is configurable (MAP_TILE_URL), so the CSP
+    # follows it. Images only: still no third-party script, no geolocation
+    # permission, and no widening of connect-src.
+    tile_origin = map_tile_config()["origin"]
+    img_src = "'self' data: blob:" + (f" {tile_origin}" if tile_origin else "")
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self'; "
-        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
-        "font-src 'self' https://fonts.gstatic.com; "
-        # OpenStreetMap raster tiles for the location map. Images only: no
-        # third-party script, no geolocation permission, no connect-src change.
-        "img-src 'self' data: blob: https://tile.openstreetmap.org; "
+        "style-src 'self' 'unsafe-inline'; "
+        "font-src 'self'; "
+        f"img-src {img_src}; "
         "connect-src 'self' ws://127.0.0.1:8765 ws://localhost:8765;"
     )
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -186,6 +191,11 @@ async def security_middleware(request: Request, call_next):
 
     response = await call_next(request)
     return _harden(response, origin)
+
+# The typefaces are self-hosted. Python's mimetypes has no .woff2 entry, so
+# StaticFiles would serve them as application/octet-stream, which some browsers
+# reject for fonts.
+mimetypes.add_type("font/woff2", ".woff2")
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 app.include_router(api.router)

@@ -15,8 +15,11 @@ def test_security_headers_present_on_document():
     assert "default-src 'self'" in csp
     assert "script-src 'self'" in csp
     assert "'unsafe-inline'" not in csp.split("script-src")[1].split(";")[0]
-    assert "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com" in csp
-    assert "font-src 'self' https://fonts.gstatic.com" in csp
+    assert "style-src 'self' 'unsafe-inline'" in csp
+    assert "font-src 'self'" in csp
+    # Typefaces are self-hosted: no third-party font origin may creep back in.
+    assert "fonts.googleapis.com" not in csp
+    assert "fonts.gstatic.com" not in csp
     assert "img-src 'self' data: blob:" in csp
     assert "connect-src 'self' ws://127.0.0.1:8765 ws://localhost:8765" in csp
 

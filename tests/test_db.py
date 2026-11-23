@@ -17,7 +17,8 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _load(env_home: str):
-    for m in ["agents", "agents.config", "agents.db", "agents.store"]:
+    for m in ["agents", "agents.config", "agents.db", "agents.store",
+              "agents.db_backfill"]:
         sys.modules.pop(m, None)
     cfg = types.ModuleType("agents.config")
     cfg.OUTPUT_DIR = Path(env_home)
@@ -26,7 +27,8 @@ def _load(env_home: str):
     sys.modules["agents"] = pkg
     sys.modules["agents.config"] = cfg
     for name, rel in (("agents.db", "agents/db.py"),
-                      ("agents.store", "agents/store.py")):
+                      ("agents.store", "agents/store.py"),
+                      ("agents.db_backfill", "agents/db_backfill.py")):
         spec = importlib.util.spec_from_file_location(
             name, os.path.join(_ROOT, "agents", rel.split("/", 1)[1]))
         mod = importlib.util.module_from_spec(spec)
@@ -48,13 +50,33 @@ def check(name):
 @check("migrate: idempotent, version recorded, WAL mode")
 def _():
     db, _ = _load(str(_TMP))
-    assert db.migrate() == 1
-    assert db.migrate() == 1  # second run is a no-op
-    assert db.current_version() == 1
+    assert db.migrate() == 2
+    assert db.migrate() == 2  # second run is a no-op
+    assert db.current_version() == 2
     assert db.journal_mode().lower() == "wal"
     st = db.status()
-    assert st["version"] == 1 and "businesses" in st["tables"]
+    assert st["version"] == 2 and "businesses" in st["tables"]
+    assert "contacts" in st["tables"]
     assert st["path"].endswith("jodiac.db")
+
+
+@check("directory schema: normalised keys, contacts, lookup indexes")
+def _():
+    db, store = _load(str(_TMP))
+    db.migrate()
+    with db.connect() as conn:
+        bcols = {r[1] for r in conn.execute("PRAGMA table_info(businesses)")}
+        ecols = {r[1] for r in conn.execute("PRAGMA table_info(emails)")}
+        idx = {r[1] for r in conn.execute("PRAGMA index_list(businesses)")}
+        view = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='view'"
+            " AND name='v_directory'").fetchone()
+    assert {"name_norm", "domain", "goal", "times_seen",
+            "first_seen", "last_seen"} <= bcols
+    assert {"business_name", "sent_at", "error", "contact_id"} <= ecols
+    assert {"idx_businesses_norm", "idx_businesses_domain",
+            "idx_businesses_email"} <= idx
+    assert view is not None
 
 
 @check("businesses: upsert dedups on (session_id, ext_id)")
@@ -88,6 +110,109 @@ def _():
     assert [r["name"] for r in fits] == ["B"]
     all_rows = store.list_businesses("s9")
     assert [r["name"] for r in all_rows] == ["B", "C", "A"]
+
+
+@check("directory: same business twice is one row with merged fields")
+def _():
+    db, store = _load(str(_TMP))
+    a = store.upsert_business("", {"name": "Aakash  Institute",
+                                   "category": "training", "phone": ""})
+    b = store.upsert_business("", {"name": "aakash institute!",
+                                   "phone": "999", "website": "http://www.aakash.in/x",
+                                   "times_seen": 6})
+    assert a == b and a > 0
+    assert store.count_businesses() == 1
+    row = store.list_businesses("")[0]
+    assert row["name_norm"] == "aakash institute"
+    assert row["domain"] == "aakash.in"
+    assert row["phone"] == "999"          # thin record did not wipe the phone
+    assert row["category"] == "training"  # nor the category
+    assert row["times_seen"] == 6
+    # replays are free: the same history cannot inflate the counter
+    store.upsert_business("", {"name": "Aakash Institute", "times_seen": 6})
+    assert store.list_businesses("")[0]["times_seen"] == 6
+
+
+@check("contacts: channels dedupe, merge, and link by domain")
+def _():
+    db, store = _load(str(_TMP))
+    bid = store.upsert_business("", {"name": "Vivekananda Institution",
+                                      "website": "www.vivekanandainstitution.com"})
+    c1 = store.upsert_contact(bid, email="viv.inst.how@gmail.com",
+                              domain="vivekanandainstitution.com",
+                              source="homepage", verified=True)
+    c2 = store.upsert_contact(bid, email="viv.inst.how@gmail.com",
+                              domain="vivekanandainstitution.com",
+                              phone="0123", status="deliverable")
+    assert c1 == c2 and c1 > 0
+    rows = store.contacts_for(bid)
+    assert len(rows) == 1
+    assert rows[0]["verified"] == 1 and rows[0]["phone"] == "0123"
+    assert rows[0]["status"] == "deliverable"
+    # An orphan found later attaches to the business owning its domain.
+    store.upsert_contact(0, email="principal@vivekanandainstitution.com")
+    store.link_contact_domains()
+    assert len(store.contacts_for(bid)) == 2
+    assert store.stats()["verified_contacts"] == 1
+
+
+@check("directory: search, stats and email link")
+def _():
+    db, store = _load(str(_TMP))
+    bid = store.upsert_business("", {"name": "Alpha Coaching",
+                                      "category": "education",
+                                      "location": "Kolkata",
+                                      "fit": {"score": 80, "fit": "fits"}})
+    store.upsert_business("", {"name": "Beta Works", "category": "training"})
+    assert [r["name"] for r in store.search_businesses("kolkata")] == ["Alpha Coaching"]
+    assert [r["name"] for r in store.search_businesses("alpha")] == ["Alpha Coaching"]
+    eid = store.save_email("", "a@alpha.com", "Hi", "body", business_id=bid,
+                           kind="sent", status="sent", business_name="Alpha Coaching")
+    assert eid > 0 and store.emails_for(bid)[0]["status"] == "sent"
+    st = store.stats()
+    assert st["businesses"] == 2 and st["sent"] == 1 and st["drafts"] == 0
+    out = {r["name"]: r for r in store.directory()}
+    assert out["Alpha Coaching"]["sent_count"] == 1
+    assert store.directory(limit=1)[0]["fit_score"] == 80
+
+
+@check("backfill: JSON stores import idempotently")
+def _():
+    root = Path(_TMP)
+    for sub in ("brain/businesses", "emails"):
+        (root / sub).mkdir(parents=True, exist_ok=True)
+    (root / "brain/businesses/a.json").write_text(
+        '{"name": "Aakash Institute", "category": "training",'
+        ' "fit": "plausible", "fit_score": 60, "why_fit": "w",'
+        ' "goal": "CAD", "times_seen": 6}', encoding="utf-8")
+    (root / "contact_cache.json").write_text(
+        '{"abc": {"email": "hi@aakash.in", "phone": "", "whatsapp": "",'
+        ' "sources": {"email": "www.aakash.in (homepage)", "email_verified": true},'
+        ' "candidates": [{"email": "hi@aakash.in", "status": "deliverable"}]}}',
+        encoding="utf-8")
+    (root / "emails/sent_ledger.jsonl").write_text(
+        '{"to": "hi@aakash.in", "name": "Aakash Institute",'
+        ' "subject": "Seats", "sent_at": "2026-11-15T22:30:37",'
+        ' "success": true, "error": ""}\n'
+        '{"to": "hey@beta.in", "name": "Beta Works", "subject": "Intro",'
+        ' "sent_at": "2026-11-15T22:31:00", "success": true, "error": ""}\n',
+        encoding="utf-8")
+    (root / "emails/bounces.jsonl").write_text(
+        '{"to": "hi@aakash.in", "subject": "Seats", "reason": "relay denied"}\n',
+        encoding="utf-8")
+    db, store = _load(str(_TMP))
+    import agents.db_backfill as bf  # loaded by _load from the same root
+    first = bf.run()
+    # 1 business from brain, 1 contact from the cache; the ledger adds the
+    # second business and its email, so the DB ends up with 2 of each.
+    assert first["businesses"] == 1 and first["contacts"] == 1
+    assert first["sent"] == 2 and first["bounced"] == 1
+    assert first["db"]["businesses"] == 2 and first["db"]["contacts"] == 2
+    # One delivery stands, the bounced one is now 'failed'.
+    assert first["db"]["sent"] == 1 and first["db"]["failed"] == 1
+    second = bf.run()  # a replay adds nothing
+    assert second["sent"] == 0 and second["db"] == first["db"]
+    assert store.stats()["businesses"] == 2
 
 
 @check("emails: draft -> sent lifecycle")
@@ -153,6 +278,11 @@ def _():
     assert store.log_usage("t", "cap") is False
     assert store.usage_stats() == {}
     assert store.provider_stats() == {}
+    assert store.search_businesses("x") == []
+    assert store.contacts_for(1) == []
+    assert store.upsert_contact(1, email="a@b.c") == 0
+    assert store.mark_email_failed(1, "e") is False
+    assert store.stats()["businesses"] == 0
     os.remove(broken)
 
 

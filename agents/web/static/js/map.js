@@ -9,7 +9,14 @@
    Pins persist in localStorage, so a campaign survives a reload.
    ═══════════════════════════════════════════════════════════════ */
 
-const TILE_URL = 'https://tile.openstreetmap.org/';
+/* The tile source is configuration, not code: the server resolves MAP_TILE_URL
+   and injects it as a meta tag, so switching to a keyed provider needs no edit
+   here. The constant is the same OpenStreetMap default the server falls back
+   to (a static /static/index.html has no meta tags to read). */
+const metaContent = (name) =>
+  document.querySelector(`meta[name="${name}"]`)?.content || '';
+const TILE_URL = metaContent('map-tile-url')
+  || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 const STORE_KEY = 'jarvis.map.v1';
 const GROWTH = 1.4;
 
@@ -54,6 +61,17 @@ const metersPerPixel = () =>
   156543.03392 * Math.cos((state.lat * Math.PI) / 180) / Math.pow(2, state.zoom);
 
 /* ── Tiles ─────────────────────────────────────────────────────── */
+/** Fill the configured template: {z}/{x}/{y} are required by the server,
+    {s} rotates the provider's subdomains, {r} is its retina suffix. */
+function tileSrc(z, x, y) {
+  return TILE_URL
+    .replace('{s}', 'abcd'[(x + y) % 4])
+    .replace('{z}', z)
+    .replace('{x}', x)
+    .replace('{y}', y)
+    .replace('{r}', '');
+}
+
 function renderTiles() {
   if (!mapWrap || !tilesEl) return;
   const w = mapWrap.clientWidth;
@@ -87,7 +105,7 @@ function renderTiles() {
           logLine('basemap unavailable - tiles did not load; pins still work');
         }
       });
-      img.src = `${TILE_URL}${z}/${((tx % max) + max) % max}/${ty}.png`;
+      img.src = tileSrc(z, ((tx % max) + max) % max, ty);
       img.style.left = `${tx * 256 - ox}px`;
       img.style.top = `${ty * 256 - oy}px`;
       frag.appendChild(img);
@@ -725,6 +743,15 @@ function openPanel(open) {
 
 function boot() {
   if (!mapWrap) return;
+  // The credit follows the tile source: a provider that is not OSM still owes
+  // OSM its line for the data, plus its own. The server sends both.
+  const attribEl = document.querySelector('.map-attrib');
+  if (attribEl) {
+    const credit = metaContent('map-attrib');
+    const creditUrl = metaContent('map-attrib-url');
+    if (credit) attribEl.textContent = credit;
+    if (creditUrl) attribEl.href = creditUrl;
+  }
   restore();
   wireMap();
   renderTiles();
